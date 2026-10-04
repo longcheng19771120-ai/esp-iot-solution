@@ -28,14 +28,27 @@ typedef struct {
     float confidence;       /*!< 0..1 */
 } genre_result_t;
 
+#define GENRE_FEATURE_COUNT 9
+
 /**
  * @brief Classify one analysis window
  *
- * This is a rule-based baseline built on tempo, beat regularity, spectral
- * balance and dynamics. It is meant to be replaced by a trained model (for
- * example an ESP-DL network on log-mel features) behind the same interface.
+ * Uses the calibrated model in genre_model.h when one has been generated with
+ * host_test/fit_genre_model.py, otherwise a rule-based baseline built on tempo,
+ * beat regularity, spectral balance and dynamics.
  */
 genre_result_t genre_classify(const music_features_t *f);
+
+/**
+ * @brief Feature vector used by the calibrated model
+ *
+ * Shared by the device and the host tools so the training data and the
+ * on-device inputs are computed by the same code.
+ */
+void genre_feature_vector(const music_features_t *f, float v[GENRE_FEATURE_COUNT]);
+
+/** True when a calibrated model is compiled in */
+bool genre_model_trained(void);
 
 const char *genre_name(music_genre_t genre);
 

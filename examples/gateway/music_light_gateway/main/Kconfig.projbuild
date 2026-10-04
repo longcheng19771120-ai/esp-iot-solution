@@ -77,11 +77,14 @@ menu "Music Light Gateway"
 
         config AUDIO_SILENCE_DB
             int "Silence threshold (dBFS)"
-            default -55
+            default -65
             range -90 -10
             help
                 Sound quieter than this is treated as silence and the light
-                falls back to a dim idle breathing effect. Raise it in noisy rooms.
+                falls back to a dim idle breathing effect. With a typical MEMS mic
+                (-26 dBFS at 94 dB SPL) music at 60-80 dB SPL arrives at about
+                -60..-40 dBFS and a quiet room at -80 dBFS or below. Raise it in
+                noisy rooms; check the level_db value in the /music messages.
     endmenu
 
     menu "RGBW light"

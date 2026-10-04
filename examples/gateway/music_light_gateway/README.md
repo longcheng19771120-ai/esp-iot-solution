@@ -21,7 +21,7 @@ external speaker (AirPlay etc.) -> MEMS mic -> I2S -> beat / loudness (every 16 
 | Effects | Genre picks the palette and how often it changes, beats flash the brightness, loudness sets the overall level; warm-white breathing when quiet |
 | Output | LEDC 12-bit PWM at 19.5 kHz (above audible), gamma 2.2, configurable duty cap for the thermal budget |
 
-**Note:** the genre classifier is a rule-based baseline. It passes on synthetic music but has not been calibrated on real room recordings yet. `genre_classify()` is designed to be swapped for a trained model, for example an ESP-DL network on log-mel features.
+**Note:** the default genre classifier is a rule-based baseline. On 8 real tracks (including simulated room pickup) it gets about half of the 5 s windows right; most confusions are between styles with similar lighting, such as classical and ambient, or hip-hop and electronic. For usable accuracy, calibrate it with recordings from your own room (see below), which switches it to a small model trained on that data.
 
 ## Suggested Pins (ESP32-S3-WROOM-1 N16R8)
 
@@ -56,6 +56,7 @@ GPIO 38–41 double as external JTAG pins; debugging over the built-in USB-JTAG 
 | `mode music` / `mode static` / `mode off` | Switch mode |
 | `color 255 120 0 50` | Static R G B W (0–255), switches to static mode |
 | `brightness 60` | Brightness 0–100 |
+| `label rock` / `label none` | Tag the following `/music` messages with a genre, for calibration |
 | `ping` / `info` / `reboot` | Diagnostics |
 
 ## Build
@@ -70,21 +71,44 @@ idf.py build flash monitor
 
 The log prints one analysis line every 5 s for tuning against what you hear.
 
-## Tuning on a PC
+## Silence Threshold
 
-The analysis code has no ESP-IDF dependencies and builds on a PC:
+A typical MEMS microphone reads -26 dBFS at 94 dB SPL, so music at 60–80 dB SPL arrives at about -60 to -40 dBFS and a quiet room is below -80 dBFS. The default threshold is -65 dBFS. Check `level_db` in the `/music` messages: it should sit clearly above the threshold while music plays and below it otherwise; adjust `AUDIO_SILENCE_DB` in menuconfig if not.
 
-```bash
-cd host_test
-make test                       # synthetic self test: tempo and genre
-ffmpeg -i song.mp3 -ac 1 -ar 16000 -sample_fmt s16 song.wav
-make analyze_wav && ./analyze_wav song.wav   # same per-window output as the device
-```
+## Calibrating Genre Detection
 
-Calibrate with music recorded through a microphone in a real room, not only with the original audio files.
+The analysis code has no ESP-IDF dependencies and builds on a PC.
+
+1. **Collect.** Recording through the gateway's own microphone in the real room works best. Play 3–5 different songs per genre you want to detect, at least a minute each:
+
+   ```bash
+   cd host_test
+   pip install paho-mqtt
+   python3 collect_mqtt.py --broker <broker> --id <gateway_id> -o room.csv
+   # send for every new song, even within the same genre, so songs can be told apart:
+   mosquitto_pub -h <broker> -t 'music-light/<gateway_id>/cmd' -m 'label rock'
+   # when done:
+   mosquitto_pub -h <broker> -t 'music-light/<gateway_id>/cmd' -m 'label none'
+   ```
+
+   WAV files work too: `./analyze_wav --csv rock song.wav >> room.csv` (convert first with `ffmpeg -i song.mp3 -ac 1 -ar 16000 -sample_fmt s16 song.wav`).
+
+2. **Fit and evaluate.** The script reports leave-one-song-out accuracy, so every song is judged by a model that never heard it:
+
+   ```bash
+   python3 fit_genre_model.py room.csv
+   ```
+
+3. **Build it in.** When the numbers look right, generate the model header and rebuild; the firmware switches to the trained model automatically:
+
+   ```bash
+   python3 fit_genre_model.py room.csv -o ../main/genre_model.h
+   ```
+
+If only some genres were collected, the model only chooses between those. Also available: `make test` runs the synthetic self test, and `./analyze_wav song.wav` prints the same per-window analysis as the device.
 
 ## Next Steps
 
 - Round touch display UI (LVGL)
-- Train an ESP-DL genre model on real recordings to replace the rules
+- With enough data, move to an ESP-DL convolutional model on log-mel features
 - Measure CPU load and power, and verify thermals with the 8 W light

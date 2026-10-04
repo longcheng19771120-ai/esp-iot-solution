@@ -2,14 +2,15 @@
 SRC_DIR := ../main
 CFLAGS  := -O2 -Wall -Wextra -I$(SRC_DIR)
 LIB_SRC := $(SRC_DIR)/music_analyzer.c $(SRC_DIR)/genre_classifier.c
+LIB_HDR := $(wildcard $(SRC_DIR)/*.h)
 
 all: test_synthetic analyze_wav
 
-test_synthetic: test_synthetic.c $(LIB_SRC)
-	$(CC) $(CFLAGS) -o $@ $^ -lm
+test_synthetic: test_synthetic.c $(LIB_SRC) $(LIB_HDR)
+	$(CC) $(CFLAGS) -o $@ test_synthetic.c $(LIB_SRC) -lm
 
-analyze_wav: analyze_wav.c $(LIB_SRC)
-	$(CC) $(CFLAGS) -o $@ $^ -lm
+analyze_wav: analyze_wav.c $(LIB_SRC) $(LIB_HDR)
+	$(CC) $(CFLAGS) -o $@ analyze_wav.c $(LIB_SRC) -lm
 
 test: test_synthetic
 	./test_synthetic

@@ -46,9 +46,16 @@ static float g_hiphop(int n)
 }
 static float g_rock(int n)
 {
-    float t = (float)n / SR, b = 60.f / 140; float ph = fmodf(t, 2 * b); float sp = fmodf(t + b, 2 * b);
-    float saw = fmodf(t * 146.8f, 1) * 2 - 1; float gtr = tanhf(4 * (saw + (fmodf(t * 220, 1) * 2 - 1))) * 0.18f;
-    return 0.5f * kick(ph) + 0.5f * snare(sp) + 0.2f * hat(fmodf(t, b / 2)) + gtr + 0.005f * noise();
+    static float prev;
+    float t = (float)n / SR, b = 60.f / 140;
+    float ph = fmodf(t, 2 * b);
+    float sp = fmodf(t + b, 2 * b);
+    float saw = fmodf(t * 146.8f, 1) * 2 - 1;
+    float gtr = tanhf(4 * (saw + (fmodf(t * 220, 1) * 2 - 1))) * 0.18f;
+    /* Ride cymbal wash: differentiated noise has most of its energy up high */
+    float w = noise(), ride = (w - prev) * 0.08f * (0.6f + 0.4f * expf(-fmodf(t, b / 2) * 10));
+    prev = w;
+    return 0.5f * kick(ph) + 0.5f * snare(sp) + 0.2f * hat(fmodf(t, b / 2)) + gtr + ride + 0.005f * noise();
 }
 static float g_classical(int n)
 {

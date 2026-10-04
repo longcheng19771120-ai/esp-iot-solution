@@ -10,6 +10,11 @@
  *
  *   ffmpeg -i song.mp3 -ac 1 -ar 16000 -sample_fmt s16 song.wav
  *   ./analyze_wav song.wav
+ *
+ * With --csv <genre> it prints one feature row per window instead, labelled
+ * for fit_genre_model.py:
+ *
+ *   ./analyze_wav --csv rock song.wav >> rock.csv
  */
 
 #include <stdio.h>
@@ -20,13 +25,19 @@
 
 int main(int argc, char **argv)
 {
-    if (argc != 2) {
-        fprintf(stderr, "usage: %s <16 kHz mono 16-bit wav>\n", argv[0]);
+    const char *label = NULL, *path = NULL;
+    if (argc == 2) {
+        path = argv[1];
+    } else if (argc == 4 && strcmp(argv[1], "--csv") == 0) {
+        label = argv[2];
+        path = argv[3];
+    } else {
+        fprintf(stderr, "usage: %s [--csv <genre>] <16 kHz mono 16-bit wav>\n", argv[0]);
         return 1;
     }
-    FILE *fp = fopen(argv[1], "rb");
+    FILE *fp = fopen(path, "rb");
     if (!fp) {
-        perror(argv[1]);
+        perror(path);
         return 1;
     }
 
@@ -66,7 +77,8 @@ int main(int argc, char **argv)
     }
 
     static music_analyzer_t ma;
-    music_analyzer_init(&ma, rate, -55);
+    /* Same as the CONFIG_AUDIO_SILENCE_DB default */
+    music_analyzer_init(&ma, rate, -65);
     int16_t pcm[MA_HOP_SIZE];
     float hop[MA_HOP_SIZE];
     music_frame_t frame;
@@ -78,10 +90,25 @@ int main(int argc, char **argv)
             hop[i] = pcm[i] / 32768.0f;
         }
         if (music_analyzer_process(&ma, hop, &frame, &f)) {
+            window++;
+            if (label) {
+                /* Silent windows carry no genre information */
+                if (f.silent_ratio > 0.7f) {
+                    continue;
+                }
+                float v[GENRE_FEATURE_COUNT];
+                genre_feature_vector(&f, v);
+                printf("%s,%s", label, path);
+                for (int i = 0; i < GENRE_FEATURE_COUNT; i++) {
+                    printf(",%.4f", v[i]);
+                }
+                printf("\n");
+                continue;
+            }
             genre_result_t r = genre_classify(&f);
             printf("%6.1fs %-10s conf %.2f | bpm %5.1f reg %.2f contrast %.2f | %5.1f dB range %4.1f | "
                    "onsets %.1f/s | bass %.2f mid %.2f high %.2f\n",
-                   (float)++window * MA_WINDOW_HOPS * MA_HOP_SIZE / rate, genre_name(r.genre), r.confidence,
+                   (float)window * MA_WINDOW_HOPS * MA_HOP_SIZE / rate, genre_name(r.genre), r.confidence,
                    f.bpm, f.regularity, f.flux_contrast, f.level_db_mean, f.level_db_range, f.onset_rate,
                    f.bass_ratio, f.mid_ratio, f.high_ratio);
         }

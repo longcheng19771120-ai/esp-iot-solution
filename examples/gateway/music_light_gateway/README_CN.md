@@ -21,7 +21,7 @@ ESP32-S3 通过数字麦克风听取外部音箱播放的音乐，在本地做�
 | 灯效 | 风格决定配色和切换节奏，鼓点触发亮度脉冲，响度控制整体亮度；安静时暖白呼吸 |
 | 输出 | LEDC 12 位 19.5 kHz PWM（高于可听频率），伽马 2.2，可设最大占空比限制发热 |
 
-**注意：** 当前风格判断是基于规则的基线版本，在合成音乐上测试通过，但还没有用真实房间录音校准。`genre_classify()` 的接口按“可替换为训练好的模型”设计，后续可换成 ESP-DL 模型（输入 log-mel 特征）。
+**注意：** 默认的风格判断是基于规则的基线版本。在 8 首真实曲目（含模拟房间拾音）上，约一半的 5 秒片段判对，常见混淆是古典↔氛围、嘻哈↔电子这类灯效相近的风格。要达到可用的准确度，需要用你自己房间的录音做一次校准（见下文），校准后改用按数据训练的小模型。
 
 ## 引脚分配（ESP32-S3-WROOM-1 N16R8 建议）
 
@@ -56,6 +56,7 @@ ESP32-S3 通过数字麦克风听取外部音箱播放的音乐，在本地做�
 | `mode music` / `mode static` / `mode off` | 切换模式 |
 | `color 255 120 0 50` | 固定色 R G B W（0–255），自动切到固定色模式 |
 | `brightness 60` | 亮度 0–100 |
+| `label rock` / `label none` | 给接下来的 `/music` 消息打上风格标签，用于校准 |
 | `ping` / `info` / `reboot` | 诊断 |
 
 ## 编译
@@ -70,21 +71,44 @@ idf.py build flash monitor
 
 日志每 5 s 打印一行分析结果，可以直接用来对照现场效果调参。
 
-## 在电脑上调风格规则
+## 静音门限
 
-分析算法不依赖 ESP-IDF，可以在电脑上跑：
+常见 MEMS 麦克风灵敏度为 -26 dBFS（94 dB SPL），房间里 60–80 dB SPL 的音乐大约是 -60 到 -40 dBFS，安静房间在 -80 dBFS 以下，所以默认静音门限设为 -65 dBFS。装好后看 `/music` 消息里的 `level_db`：音乐播放时应明显高于门限，不放音乐时应低于门限，否则在 menuconfig 里调整 `AUDIO_SILENCE_DB`。
 
-```bash
-cd host_test
-make test                       # 合成音乐自测：BPM 和风格
-ffmpeg -i song.mp3 -ac 1 -ar 16000 -sample_fmt s16 song.wav
-make analyze_wav && ./analyze_wav song.wav   # 输出与设备上相同的逐窗分析
-```
+## 校准风格判断
 
-建议用麦克风在真实房间里录几段不同风格的音乐来校准，而不是只用原始音频文件。
+分析代码不依赖 ESP-IDF，可以在电脑上编译运行。校准步骤：
+
+1. **采集。** 用网关自己的麦克风在实际房间里采集最准确。每种想识别的风格放 3–5 首不同的歌，每首放 1 分钟以上：
+
+   ```bash
+   cd host_test
+   pip install paho-mqtt
+   python3 collect_mqtt.py --broker <服务器> --id <网关id> -o room.csv
+   # 每换一首歌发一次（同一风格也要重发，用来区分不同的歌）：
+   mosquitto_pub -h <服务器> -t 'music-light/<网关id>/cmd' -m 'label rock'
+   # 结束后：
+   mosquitto_pub -h <服务器> -t 'music-light/<网关id>/cmd' -m 'label none'
+   ```
+
+   也可以用录音文件：`./analyze_wav --csv rock song.wav >> room.csv`（先用 `ffmpeg -i song.mp3 -ac 1 -ar 16000 -sample_fmt s16 song.wav` 转格式）。
+
+2. **训练和评估。** 脚本按“每次留出一首歌”评估准确度，没训练过的歌也要判对才算数：
+
+   ```bash
+   python3 fit_genre_model.py room.csv
+   ```
+
+3. **写入固件。** 结果满意后生成模型头文件，重新编译烧录，设备会自动改用训练好的模型：
+
+   ```bash
+   python3 fit_genre_model.py room.csv -o ../main/genre_model.h
+   ```
+
+只采集了部分风格时，模型只会在这些风格之间选择。其他工具：`make test` 跑合成音乐自测，`./analyze_wav song.wav` 打印与设备相同的逐段分析。
 
 ## 后续
 
 - 圆形触摸屏界面（LVGL）
-- 用真实录音训练 ESP-DL 风格分类模型，替换规则版
+- 数据足够多以后，可换成 ESP-DL 卷积模型（输入 log-mel 特征）
 - 实测 CPU 占用和功耗，确认 8 W 灯光下的散热

@@ -40,6 +40,11 @@ static char s_topic_light[TOPIC_LEN];
 static char s_topic_cmd[TOPIC_LEN];
 static char s_topic_resp[TOPIC_LEN];
 
+/* Calibration: label attached to /music messages, see host_test/collect_mqtt.py */
+static char s_label[16];
+static int s_label_session;
+static portMUX_TYPE s_label_lock = portMUX_INITIALIZER_UNLOCKED;
+
 bool gateway_mqtt_is_connected(void)
 {
     return s_connected;
@@ -57,12 +62,34 @@ static esp_err_t publish(const char *topic, const char *data, size_t len, int qo
 
 esp_err_t gateway_mqtt_publish_music(music_genre_t genre, float confidence, const music_features_t *f)
 {
-    char buf[256];
+    char buf[512];
+    char label[sizeof(s_label)];
+    int session;
+    float v[GENRE_FEATURE_COUNT];
+
+    portENTER_CRITICAL(&s_label_lock);
+    memcpy(label, s_label, sizeof(label));
+    session = s_label_session;
+    portEXIT_CRITICAL(&s_label_lock);
+
     int n = snprintf(buf, sizeof(buf),
                      "{\"genre\":\"%s\",\"confidence\":%.2f,\"bpm\":%.1f,\"regularity\":%.2f,\"level_db\":%.1f,"
-                     "\"range_db\":%.1f,\"onsets_per_s\":%.2f,\"bass\":%.2f,\"mid\":%.2f,\"high\":%.2f}",
+                     "\"range_db\":%.1f,\"onsets_per_s\":%.2f,\"bass\":%.2f,\"mid\":%.2f,\"high\":%.2f,"
+                     "\"silent\":%.2f,\"vec\":[",
                      genre_name(genre), confidence, f->bpm, f->regularity, f->level_db_mean, f->level_db_range,
-                     f->onset_rate, f->bass_ratio, f->mid_ratio, f->high_ratio);
+                     f->onset_rate, f->bass_ratio, f->mid_ratio, f->high_ratio, f->silent_ratio);
+    genre_feature_vector(f, v);
+    for (int i = 0; i < GENRE_FEATURE_COUNT && n < (int)sizeof(buf); i++) {
+        n += snprintf(buf + n, sizeof(buf) - n, "%s%.4f", i ? "," : "", v[i]);
+    }
+    if (n < (int)sizeof(buf) && label[0]) {
+        n += snprintf(buf + n, sizeof(buf) - n, "],\"label\":\"%s\",\"session\":%d}", label, session);
+    } else if (n < (int)sizeof(buf)) {
+        n += snprintf(buf + n, sizeof(buf) - n, "]}");
+    }
+    if (n >= (int)sizeof(buf)) {
+        return ESP_ERR_INVALID_SIZE;
+    }
     return publish(s_topic_music, buf, n, 0, false);
 }
 
@@ -99,6 +126,7 @@ static int build_telemetry(char *buf, size_t size)
  *   mode music|static|off
  *   color <r> <g> <b> <w>     0..255 each, switches to static mode
  *   brightness <0..100>
+ *   label <genre>|none        tag /music messages for calibration
  */
 static void handle_cmd(const char *data, int len)
 {
@@ -143,6 +171,21 @@ static void handle_cmd(const char *data, int len)
         });
     } else if (sscanf(cmd, "brightness %d", &v) == 1) {
         light_set_brightness(v / 100.0f);
+    } else if (sscanf(cmd, "label %15s", arg) == 1) {
+        bool none = strcmp(arg, "none") == 0;
+        bool known = false;
+        for (int g = MUSIC_GENRE_AMBIENT; g < MUSIC_GENRE_MAX; g++) {
+            known |= strcmp(arg, genre_name((music_genre_t)g)) == 0;
+        }
+        if (!none && !known) {
+            reply("error: label must be a genre name or none");
+            return;
+        }
+        portENTER_CRITICAL(&s_label_lock);
+        strlcpy(s_label, none ? "" : arg, sizeof(s_label));
+        /* Every label command starts a new session, so each song can be told apart */
+        s_label_session++;
+        portEXIT_CRITICAL(&s_label_lock);
     } else {
         snprintf(buf, sizeof(buf), "error: unknown command: %s", cmd);
         reply(buf);
