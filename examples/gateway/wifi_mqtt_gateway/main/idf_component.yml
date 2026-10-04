@@ -1,0 +1,15 @@
+## IDF Component Manager Manifest File
+dependencies:
+  idf:
+    version: ">=5.3"
+  espressif/button:
+    version: "^4.1.0"
+    override_path: "../../../../components/button"
+  espressif/led_indicator:
+    version: "^2.0.0"
+    override_path: "../../../../components/led/led_indicator"
+  # esp-mqtt moved out of ESP-IDF in v6.0
+  espressif/mqtt:
+    version: "1.*"
+    rules:
+      - if: "idf_version >=6.0"

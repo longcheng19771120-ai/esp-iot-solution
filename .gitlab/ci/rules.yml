@@ -1013,6 +1013,9 @@
 .patterns-example_network_provisioner: &patterns-example_network_provisioner
   - "examples/network_provisioner/**/*"
 
+.patterns-example_gateway_wifi_mqtt_gateway: &patterns-example_gateway_wifi_mqtt_gateway
+  - "examples/gateway/wifi_mqtt_gateway/**/*"
+
 .patterns-example_esp_local_controller: &patterns-example_esp_local_controller
   - "examples/esp_local_controller/**/*"
 
@@ -4009,6 +4012,19 @@
       changes: *patterns-components_protocomm_ext
     - <<: *if-dev-push
       changes: *patterns-example_network_provisioner
+
+.rules:build:example_gateway_wifi_mqtt_gateway:
+  rules:
+    - <<: *if-protected
+    - <<: *if-label-build
+    - <<: *if-dev-push
+      changes: *patterns-build_system
+    - <<: *if-dev-push
+      changes: *patterns-components_button
+    - <<: *if-dev-push
+      changes: *patterns-components_led_led_indicator
+    - <<: *if-dev-push
+      changes: *patterns-example_gateway_wifi_mqtt_gateway
 
 .rules:build:example_esp_local_controller:
   rules:
