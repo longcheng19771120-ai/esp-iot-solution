@@ -20,11 +20,14 @@ extern "C" {
  * Every MA_HOP_SIZE new samples a MA_FFT_SIZE Hann-windowed FFT is computed.
  * Per hop it reports the loudness and whether a beat (onset) was detected.
  * Every MA_WINDOW_HOPS hops it summarises the window into music_features_t,
- * which the genre classifier consumes.
+ * which the mood estimator consumes. A longer FFT feeds a chromagram for key
+ * and major/minor mode detection.
  */
 #define MA_FFT_SIZE     512
 #define MA_HOP_SIZE     256
 #define MA_WINDOW_HOPS  320     /* 5.12 s at 16 kHz */
+#define MA_CHROMA_FFT   2048    /* longer FFT for pitch resolution, run every MA_CHROMA_EVERY hops */
+#define MA_CHROMA_EVERY 4
 
 typedef struct {
     float level_db;         /*!< RMS level of the hop, dBFS */
@@ -50,6 +53,9 @@ typedef struct {
     float bpm;              /*!< Tempo estimate from onset autocorrelation, 0 if none */
     float regularity;       /*!< 0..1, strength of the periodic beat */
     float silent_ratio;     /*!< Share of hops below the silence threshold */
+    float mode;             /*!< Major minus minor key correlation, > 0 leans major */
+    float key_strength;     /*!< Best key correlation, 0..1, low for atonal or drum-only audio */
+    int key;                /*!< Best key, 0..11 = C..B major, 12..23 = C..B minor */
 } music_features_t;
 
 typedef struct {
@@ -57,11 +63,12 @@ typedef struct {
     float silence_db;
 
     float window[MA_FFT_SIZE];          /* Hann window */
-    float twiddle_re[MA_FFT_SIZE / 2];
-    float twiddle_im[MA_FFT_SIZE / 2];
-    float buf[MA_FFT_SIZE];             /* sliding input buffer */
-    float re[MA_FFT_SIZE];
-    float im[MA_FFT_SIZE];
+    float twiddle_re[MA_CHROMA_FFT / 2];
+    float twiddle_im[MA_CHROMA_FFT / 2];
+    float buf[MA_CHROMA_FFT];           /* sliding input buffer, newest samples last */
+    float re[MA_CHROMA_FFT];
+    float im[MA_CHROMA_FFT];
+    uint8_t bin_pitch[MA_CHROMA_FFT / 2]; /* pitch class of each chroma FFT bin, 0xff if unused */
     float prev_logmag[MA_FFT_SIZE / 2 + 1];
 
     float peak_rms;                     /* auto gain tracker */
@@ -74,7 +81,8 @@ typedef struct {
     float onset_env[MA_WINDOW_HOPS];
     float level_db[MA_WINDOW_HOPS];
     double sum_bass, sum_mid, sum_high, sum_centroid, sum_flux;
-    int onsets, silent_hops, voiced_hops;
+    double chroma[12];
+    int onsets, silent_hops, voiced_hops, hop_count;
 } music_analyzer_t;
 
 /**

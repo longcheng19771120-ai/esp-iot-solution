@@ -10,7 +10,7 @@
 #include <stdbool.h>
 #include "esp_err.h"
 #include "music_analyzer.h"
-#include "genre_classifier.h"
+#include "mood_estimator.h"
 #include "light_effect.h"
 
 #ifdef __cplusplus
@@ -27,7 +27,7 @@ const char *gateway_get_id(void);
 esp_err_t gateway_mqtt_start(void);
 bool gateway_mqtt_is_connected(void);
 /** Publish the current music analysis to <prefix>/<id>/music */
-esp_err_t gateway_mqtt_publish_music(music_genre_t genre, float confidence, const music_features_t *f);
+esp_err_t gateway_mqtt_publish_music(const mood_t *mood, const music_features_t *f);
 /** Publish the light state to <prefix>/<id>/light/state (retained) */
 esp_err_t gateway_mqtt_publish_light_state(void);
 
@@ -37,7 +37,7 @@ esp_err_t audio_input_start(void);
 /* RGBW output (light_rgbw.c), all functions are thread safe */
 esp_err_t light_rgbw_start(void);
 void light_on_frame(const music_frame_t *frame);
-void light_set_genre(music_genre_t genre);
+void light_set_mood(const mood_t *mood);
 void light_set_mode(light_mode_t mode);
 void light_set_color(rgbw_t color);
 void light_set_brightness(float brightness);

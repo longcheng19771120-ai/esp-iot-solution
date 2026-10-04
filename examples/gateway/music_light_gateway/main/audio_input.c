@@ -15,9 +15,6 @@
  * These output 24-bit samples left aligned in a 32-bit slot.
  */
 #define SAMPLE_RATE CONFIG_AUDIO_SAMPLE_RATE
-/* Switch genre only after this many agreeing windows, unless very confident */
-#define GENRE_STABLE_WINDOWS 2
-#define GENRE_FAST_CONFIDENCE 0.8f
 
 static const char *TAG = "audio";
 
@@ -30,8 +27,6 @@ static void audio_task(void *arg)
     static float samples[MA_HOP_SIZE];
     music_frame_t frame;
     music_features_t features;
-    music_genre_t current = MUSIC_GENRE_SILENCE, candidate = MUSIC_GENRE_SILENCE;
-    int candidate_count = 0;
 
     while (1) {
         size_t got = 0;
@@ -48,26 +43,14 @@ static void audio_task(void *arg)
             continue;
         }
 
-        genre_result_t res = genre_classify(&features);
-        ESP_LOGI(TAG, "%-10s conf %.2f | %5.1f dBFS range %4.1f | bpm %5.1f reg %.2f | onsets %.1f/s | "
-                 "bass %.2f mid %.2f high %.2f", genre_name(res.genre), res.confidence, features.level_db_mean,
-                 features.level_db_range, features.bpm, features.regularity, features.onset_rate,
-                 features.bass_ratio, features.mid_ratio, features.high_ratio);
-
-        if (res.genre == candidate) {
-            candidate_count++;
-        } else {
-            candidate = res.genre;
-            candidate_count = 1;
-        }
-        if (candidate != current &&
-                (candidate_count >= GENRE_STABLE_WINDOWS || res.confidence >= GENRE_FAST_CONFIDENCE)) {
-            ESP_LOGI(TAG, "Genre: %s -> %s", genre_name(current), genre_name(candidate));
-            current = candidate;
-            light_set_genre(current);
-            gateway_mqtt_publish_light_state();
-        }
-        gateway_mqtt_publish_music(current, res.confidence, &features);
+        /* The light smooths the mood itself, so every window is passed on */
+        mood_t mood = mood_estimate(&features);
+        light_set_mood(&mood);
+        ESP_LOGI(TAG, "%-7s valence %.2f energy %.2f | mode %+.2f key %.2f | bpm %5.1f reg %.2f | "
+                 "onsets %.1f/s | %5.1f dBFS", mood_quadrant_name(mood_quadrant(&mood)), mood.valence, mood.energy,
+                 features.mode, features.key_strength, features.bpm, features.regularity, features.onset_rate,
+                 features.level_db_mean);
+        gateway_mqtt_publish_music(&mood, &features);
     }
 }
 
@@ -99,7 +82,7 @@ esp_err_t audio_input_start(void)
     ESP_LOGI(TAG, "Mic on BCLK %d WS %d DIN %d, %d Hz", CONFIG_AUDIO_I2S_BCLK_GPIO, CONFIG_AUDIO_I2S_WS_GPIO,
              CONFIG_AUDIO_I2S_DIN_GPIO, SAMPLE_RATE);
 
-    /* FFT and tempo estimation need a few KB of stack */
+    /* FFT, tempo and key estimation need a few KB of stack */
     if (xTaskCreate(audio_task, "audio", 8192, NULL, 7, NULL) != pdPASS) {
         return ESP_ERR_NO_MEM;
     }

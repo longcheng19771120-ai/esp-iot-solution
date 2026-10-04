@@ -2,7 +2,7 @@
 # SPDX-FileCopyrightText: 2026 Espressif Systems (Shanghai) CO LTD
 # SPDX-License-Identifier: Apache-2.0
 """
-Collect labelled feature rows from a running gateway for fit_genre_model.py.
+Collect labelled feature rows from a running gateway for fit_mood_model.py.
 
 This calibrates with the gateway's own microphone in the real room, which is
 what the model will hear in use. Play one song, tag it, repeat:
@@ -10,7 +10,8 @@ what the model will hear in use. Play one song, tag it, repeat:
     pip install paho-mqtt
     python3 collect_mqtt.py --broker broker.emqx.io --id <gateway_id> -o room.csv
     # in another terminal, for each song (send again for every new song):
-    mosquitto_pub -h broker.emqx.io -t 'music-light/<gateway_id>/cmd' -m 'label rock'
+    mosquitto_pub -h broker.emqx.io -t 'music-light/<gateway_id>/cmd' -m 'label happy'
+    # quadrants: calm, happy, tense, sad; or exact values: 'label 0.3 0.9' (valence energy)
     ...
     mosquitto_pub -h broker.emqx.io -t 'music-light/<gateway_id>/cmd' -m 'label none'
 
@@ -45,15 +46,17 @@ def main():
         except ValueError:
             return
         label = m.get('label')
-        # Silent windows carry no genre information
+        # Silent windows carry no mood information
         if not label or m.get('silent', 0) > 0.7:
             return
         source = 'device-session-{}'.format(m.get('session', 0))
         with open(args.output, 'a') as f:
-            f.write(','.join([label, source] + ['{:.4f}'.format(x) for x in m['vec']]) + '\n')
-        counts[label] = counts.get(label, 0) + 1
-        print('{:<10} {:<20} bpm {:6.1f}  total: {}'.format(
-            label, source, m.get('bpm', 0), ', '.join('{} {}'.format(k, v) for k, v in sorted(counts.items()))))
+            f.write(','.join(['{:.2f}'.format(label[0]), '{:.2f}'.format(label[1]), source,
+                              '{:.3f}'.format(m['valence']), '{:.3f}'.format(m['energy'])] +
+                             ['{:.4f}'.format(x) for x in m['vec']]) + '\n')
+        counts[source] = counts.get(source, 0) + 1
+        print('{:<20} label v {:.2f} e {:.2f} | estimate v {:.2f} e {:.2f} | windows {}'.format(
+            source, label[0], label[1], m.get('valence', 0), m.get('energy', 0), counts[source]))
 
     client = mqtt.Client(mqtt.CallbackAPIVersion.VERSION2)
     client.on_connect = on_connect

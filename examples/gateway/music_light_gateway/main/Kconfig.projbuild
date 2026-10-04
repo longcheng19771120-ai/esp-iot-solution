@@ -73,7 +73,7 @@ menu "Music Light Gateway"
             default 16000
             range 8000 48000
             help
-                16 kHz covers the bands used for beat and genre analysis.
+                16 kHz covers the bands used for beat and mood analysis.
 
         config AUDIO_SILENCE_DB
             int "Silence threshold (dBFS)"

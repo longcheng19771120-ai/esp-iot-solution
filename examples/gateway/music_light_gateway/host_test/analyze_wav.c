@@ -5,34 +5,48 @@
  */
 
 /*
- * Run the on-device music analysis on a WAV file, to tune the genre rules
+ * Run the on-device music analysis on a WAV file, to check the mood estimate
  * against real recordings without flashing.
  *
  *   ffmpeg -i song.mp3 -ac 1 -ar 16000 -sample_fmt s16 song.wav
  *   ./analyze_wav song.wav
  *
- * With --csv <genre> it prints one feature row per window instead, labelled
- * for fit_genre_model.py:
+ * With --csv <label> it prints one feature row per window instead, for
+ * fit_mood_model.py. The label is a quadrant (calm, happy, tense, sad) or a
+ * "valence,energy" pair in 0..1:
  *
- *   ./analyze_wav --csv rock song.wav >> rock.csv
+ *   ./analyze_wav --csv happy song.wav >> room.csv
+ *   ./analyze_wav --csv 0.3,0.9 song.wav >> room.csv
  */
 
 #include <stdio.h>
 #include <stdint.h>
 #include <string.h>
 #include "music_analyzer.h"
-#include "genre_classifier.h"
+#include "mood_estimator.h"
+
+static const char *const s_keys[24] = {
+    "C", "C#", "D", "D#", "E", "F", "F#", "G", "G#", "A", "A#", "B",
+    "Cm", "C#m", "Dm", "D#m", "Em", "Fm", "F#m", "Gm", "G#m", "Am", "A#m", "Bm",
+};
 
 int main(int argc, char **argv)
 {
     const char *label = NULL, *path = NULL;
+    float target_v = 0, target_e = 0;
+
     if (argc == 2) {
         path = argv[1];
     } else if (argc == 4 && strcmp(argv[1], "--csv") == 0) {
         label = argv[2];
         path = argv[3];
+        if (!mood_quadrant_target(label, &target_v, &target_e) &&
+                sscanf(label, "%f,%f", &target_v, &target_e) != 2) {
+            fprintf(stderr, "label must be calm, happy, tense, sad or valence,energy\n");
+            return 1;
+        }
     } else {
-        fprintf(stderr, "usage: %s [--csv <genre>] <16 kHz mono 16-bit wav>\n", argv[0]);
+        fprintf(stderr, "usage: %s [--csv <label>] <16 kHz mono 16-bit wav>\n", argv[0]);
         return 1;
     }
     FILE *fp = fopen(path, "rb");
@@ -89,29 +103,32 @@ int main(int argc, char **argv)
         for (int i = 0; i < MA_HOP_SIZE; i++) {
             hop[i] = pcm[i] / 32768.0f;
         }
-        if (music_analyzer_process(&ma, hop, &frame, &f)) {
-            window++;
-            if (label) {
-                /* Silent windows carry no genre information */
-                if (f.silent_ratio > 0.7f) {
-                    continue;
-                }
-                float v[GENRE_FEATURE_COUNT];
-                genre_feature_vector(&f, v);
-                printf("%s,%s", label, path);
-                for (int i = 0; i < GENRE_FEATURE_COUNT; i++) {
-                    printf(",%.4f", v[i]);
-                }
-                printf("\n");
+        if (!music_analyzer_process(&ma, hop, &frame, &f)) {
+            continue;
+        }
+        window++;
+        if (label) {
+            /* Silent windows carry no mood information */
+            if (f.silent_ratio > 0.7f) {
                 continue;
             }
-            genre_result_t r = genre_classify(&f);
-            printf("%6.1fs %-10s conf %.2f | bpm %5.1f reg %.2f contrast %.2f | %5.1f dB range %4.1f | "
-                   "onsets %.1f/s | bass %.2f mid %.2f high %.2f\n",
-                   (float)window * MA_WINDOW_HOPS * MA_HOP_SIZE / rate, genre_name(r.genre), r.confidence,
-                   f.bpm, f.regularity, f.flux_contrast, f.level_db_mean, f.level_db_range, f.onset_rate,
-                   f.bass_ratio, f.mid_ratio, f.high_ratio);
+            float v[MOOD_FEATURE_COUNT];
+            mood_feature_vector(&f, v);
+            /* The current estimate goes along so the fit can be compared against it */
+            mood_t m = mood_estimate(&f);
+            printf("%.2f,%.2f,%s,%.3f,%.3f", target_v, target_e, path, m.valence, m.energy);
+            for (int i = 0; i < MOOD_FEATURE_COUNT; i++) {
+                printf(",%.4f", v[i]);
+            }
+            printf("\n");
+            continue;
         }
+        mood_t m = mood_estimate(&f);
+        printf("%6.1fs %-7s valence %.2f energy %.2f | key %-3s mode %+.2f strength %.2f | bpm %5.1f reg %.2f "
+               "contrast %.2f | onsets %.1f/s | bass %.2f mid %.2f high %.2f | %5.1f dB\n",
+               (float)window * MA_WINDOW_HOPS * MA_HOP_SIZE / rate, mood_quadrant_name(mood_quadrant(&m)),
+               m.valence, m.energy, s_keys[f.key], f.mode, f.key_strength, f.bpm, f.regularity, f.flux_contrast,
+               f.onset_rate, f.bass_ratio, f.mid_ratio, f.high_ratio, f.level_db_mean);
     }
     fclose(fp);
     return 0;

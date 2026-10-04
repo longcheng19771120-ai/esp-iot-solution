@@ -25,17 +25,27 @@ void music_analyzer_init(music_analyzer_t *ma, int sample_rate, float silence_db
     for (int i = 0; i < MA_FFT_SIZE; i++) {
         ma->window[i] = 0.5f - 0.5f * cosf(TWO_PI * i / MA_FFT_SIZE);
     }
-    for (int i = 0; i < MA_FFT_SIZE / 2; i++) {
-        ma->twiddle_re[i] = cosf(TWO_PI * i / MA_FFT_SIZE);
-        ma->twiddle_im[i] = -sinf(TWO_PI * i / MA_FFT_SIZE);
+    for (int i = 0; i < MA_CHROMA_FFT / 2; i++) {
+        ma->twiddle_re[i] = cosf(TWO_PI * i / MA_CHROMA_FFT);
+        ma->twiddle_im[i] = -sinf(TWO_PI * i / MA_CHROMA_FFT);
+    }
+    /* Pitch classes from A2 (110 Hz) to A7 (3520 Hz); below that the bins are too coarse */
+    const float bin_hz = (float)sample_rate / MA_CHROMA_FFT;
+    for (int k = 0; k < MA_CHROMA_FFT / 2; k++) {
+        float f = k * bin_hz;
+        ma->bin_pitch[k] = 0xff;
+        if (f >= 110.0f && f <= 3520.0f) {
+            /* 0 = C: A is 9 semitones above C */
+            int midi = (int)lroundf(69.0f + 12.0f * log2f(f / 440.0f));
+            ma->bin_pitch[k] = (uint8_t)(midi % 12);
+        }
     }
 }
 
-/* In-place iterative radix-2 FFT */
-static void fft(music_analyzer_t *ma)
+/* In-place iterative radix-2 FFT of size n (a power of two up to MA_CHROMA_FFT) */
+static void fft(music_analyzer_t *ma, int n)
 {
     float *re = ma->re, *im = ma->im;
-    const int n = MA_FFT_SIZE;
 
     for (int i = 1, j = 0; i < n; i++) {
         int bit = n >> 1;
@@ -53,7 +63,7 @@ static void fft(music_analyzer_t *ma)
         }
     }
     for (int len = 2; len <= n; len <<= 1) {
-        int step = n / len;
+        int step = MA_CHROMA_FFT / len;
         for (int i = 0; i < n; i += len) {
             for (int k = 0; k < len / 2; k++) {
                 float wr = ma->twiddle_re[k * step];
@@ -139,6 +149,76 @@ static void estimate_tempo(const music_analyzer_t *ma, float *bpm, float *regula
     }
 }
 
+/* Accumulate a normalised pitch-class profile from the long FFT */
+static void accumulate_chroma(music_analyzer_t *ma)
+{
+    float frame[12] = {0}, total = 0;
+
+    for (int i = 0; i < MA_CHROMA_FFT; i++) {
+        float w = 0.5f - 0.5f * cosf(TWO_PI * i / MA_CHROMA_FFT);
+        ma->re[i] = ma->buf[i] * w;
+        ma->im[i] = 0;
+    }
+    fft(ma, MA_CHROMA_FFT);
+    for (int k = 1; k < MA_CHROMA_FFT / 2; k++) {
+        if (ma->bin_pitch[k] != 0xff) {
+            float mag = sqrtf(ma->re[k] * ma->re[k] + ma->im[k] * ma->im[k]);
+            frame[ma->bin_pitch[k]] += mag;
+            total += mag;
+        }
+    }
+    /* Every frame counts equally, so loud passages don't dominate the key */
+    if (total > 1e-6f) {
+        for (int p = 0; p < 12; p++) {
+            ma->chroma[p] += frame[p] / total;
+        }
+    }
+}
+
+/* Krumhansl-Kessler key profiles, index 0 = tonic */
+static const float s_major[12] = {6.35f, 2.23f, 3.48f, 2.33f, 4.38f, 4.09f, 2.52f, 5.19f, 2.39f, 3.66f, 2.29f, 2.88f};
+static const float s_minor[12] = {6.33f, 2.68f, 3.52f, 5.38f, 2.60f, 3.53f, 2.54f, 4.75f, 3.98f, 2.69f, 3.34f, 3.17f};
+
+static float correlate(const double *chroma, const float *profile, int tonic)
+{
+    double mc = 0, mp = 0, num = 0, dc = 0, dp = 0;
+    for (int i = 0; i < 12; i++) {
+        mc += chroma[i];
+        mp += profile[i];
+    }
+    mc /= 12;
+    mp /= 12;
+    for (int i = 0; i < 12; i++) {
+        double c = chroma[(i + tonic) % 12] - mc, p = profile[i] - mp;
+        num += c * p;
+        dc += c * c;
+        dp += p * p;
+    }
+    return dc > 0 ? (float)(num / sqrt(dc * dp)) : 0;
+}
+
+static void estimate_key(const music_analyzer_t *ma, music_features_t *f)
+{
+    float best_major = -1, best_minor = -1;
+    int key_major = 0, key_minor = 0;
+
+    for (int t = 0; t < 12; t++) {
+        float r = correlate(ma->chroma, s_major, t);
+        if (r > best_major) {
+            best_major = r;
+            key_major = t;
+        }
+        r = correlate(ma->chroma, s_minor, t);
+        if (r > best_minor) {
+            best_minor = r;
+            key_minor = t;
+        }
+    }
+    f->mode = best_major - best_minor;
+    f->key_strength = fmaxf(0, fmaxf(best_major, best_minor));
+    f->key = best_major >= best_minor ? key_major : 12 + key_minor;
+}
+
 static void finish_window(music_analyzer_t *ma, music_features_t *f)
 {
     const float seconds = (float)MA_WINDOW_HOPS * MA_HOP_SIZE / ma->sample_rate;
@@ -177,10 +257,12 @@ static void finish_window(music_analyzer_t *ma, music_features_t *f)
     f->onset_rate = ma->onsets / seconds;
     f->silent_ratio = (float)ma->silent_hops / MA_WINDOW_HOPS;
     estimate_tempo(ma, &f->bpm, &f->regularity);
+    estimate_key(ma, f);
 
     ma->hop_in_window = 0;
     ma->sum_bass = ma->sum_mid = ma->sum_high = ma->sum_centroid = ma->sum_flux = 0;
     ma->onsets = ma->silent_hops = ma->voiced_hops = 0;
+    memset(ma->chroma, 0, sizeof(ma->chroma));
 }
 
 bool music_analyzer_process(music_analyzer_t *ma, const float *samples, music_frame_t *frame,
@@ -193,8 +275,9 @@ bool music_analyzer_process(music_analyzer_t *ma, const float *samples, music_fr
     memset(frame, 0, sizeof(*frame));
 
     /* Slide the buffer and compute the hop RMS */
-    memmove(ma->buf, ma->buf + MA_HOP_SIZE, (MA_FFT_SIZE - MA_HOP_SIZE) * sizeof(float));
-    memcpy(ma->buf + MA_FFT_SIZE - MA_HOP_SIZE, samples, MA_HOP_SIZE * sizeof(float));
+    memmove(ma->buf, ma->buf + MA_HOP_SIZE, (MA_CHROMA_FFT - MA_HOP_SIZE) * sizeof(float));
+    memcpy(ma->buf + MA_CHROMA_FFT - MA_HOP_SIZE, samples, MA_HOP_SIZE * sizeof(float));
+    const float *recent = ma->buf + MA_CHROMA_FFT - MA_FFT_SIZE;
     float energy = 0;
     for (int i = 0; i < MA_HOP_SIZE; i++) {
         energy += samples[i] * samples[i];
@@ -213,10 +296,10 @@ bool music_analyzer_process(music_analyzer_t *ma, const float *samples, music_fr
 
     /* Spectrum */
     for (int i = 0; i < MA_FFT_SIZE; i++) {
-        ma->re[i] = ma->buf[i] * ma->window[i];
+        ma->re[i] = recent[i] * ma->window[i];
         ma->im[i] = 0;
     }
-    fft(ma);
+    fft(ma, MA_FFT_SIZE);
 
     float e_bass = 0, e_mid = 0, e_high = 0, weighted = 0, flux = 0;
     for (int k = 1; k < BINS; k++) {
@@ -275,6 +358,9 @@ bool music_analyzer_process(music_analyzer_t *ma, const float *samples, music_fr
     if (frame->silent) {
         ma->silent_hops++;
     } else {
+        if (++ma->hop_count % MA_CHROMA_EVERY == 0) {
+            accumulate_chroma(ma);
+        }
         ma->voiced_hops++;
         ma->sum_bass += frame->bass;
         ma->sum_mid += frame->mid;

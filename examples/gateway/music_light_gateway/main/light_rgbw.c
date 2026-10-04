@@ -98,10 +98,10 @@ void light_on_frame(const music_frame_t *frame)
     portEXIT_CRITICAL(&s_lock);
 }
 
-void light_set_genre(music_genre_t genre)
+void light_set_mood(const mood_t *mood)
 {
     portENTER_CRITICAL(&s_lock);
-    light_effect_set_genre(&s_fx, genre);
+    light_effect_set_mood(&s_fx, mood);
     portEXIT_CRITICAL(&s_lock);
 }
 
@@ -143,11 +143,9 @@ int light_get_state_json(char *buf, size_t size)
     light_mode_t mode = s_fx.mode;
     rgbw_t c = s_fx.static_color;
     float bri = s_fx.brightness;
-    music_genre_t genre = s_fx.genre;
     portEXIT_CRITICAL(&s_lock);
 
-    return snprintf(buf, size,
-                    "{\"mode\":\"%s\",\"brightness\":%d,\"color\":[%d,%d,%d,%d],\"genre\":\"%s\"}",
+    return snprintf(buf, size, "{\"mode\":\"%s\",\"brightness\":%d,\"color\":[%d,%d,%d,%d]}",
                     light_mode_name(mode), (int)lroundf(bri * 100), (int)lroundf(c.r * 255), (int)lroundf(c.g * 255),
-                    (int)lroundf(c.b * 255), (int)lroundf(c.w * 255), genre_name(genre));
+                    (int)lroundf(c.b * 255), (int)lroundf(c.w * 255));
 }
