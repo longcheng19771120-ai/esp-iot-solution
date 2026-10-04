@@ -2294,6 +2294,14 @@ build_example_gateway_wifi_mqtt_gateway:
   variables:
     EXAMPLE_DIR: examples/gateway/wifi_mqtt_gateway
 
+build_example_gateway_music_light_gateway:
+  extends:
+    - .build_examples_template
+    - .rules:build:example_gateway_music_light_gateway
+    - .build_idf_active_release_version
+  variables:
+    EXAMPLE_DIR: examples/gateway/music_light_gateway
+
 build_components_esp_local_controller_test_apps:
   extends:
     - .build_examples_template

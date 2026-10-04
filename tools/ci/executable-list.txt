@@ -18,6 +18,8 @@ examples/elf_loader/elf_console_example/main/fs_image/xtensa/test_app.elf
 examples/elf_loader/elf_console_example/main/fs_image/xtensa/test_so.elf
 examples/elf_loader/elf_loader_example/main/test_riscv.elf
 examples/elf_loader/elf_loader_example/main/test_xtensa.elf
+examples/gateway/music_light_gateway/host_test/collect_mqtt.py
+examples/gateway/music_light_gateway/host_test/fit_mood_model.py
 examples/mcp/mcp_server/gen_es256_test_materials.sh
 examples/usb/device/bootloader_uf2/utils/redirect.sh
 examples/usb/device/usb_msc_wireless_disk/tools/analyze_upload_log_en.py
