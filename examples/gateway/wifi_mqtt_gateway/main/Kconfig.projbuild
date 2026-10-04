@@ -1,0 +1,104 @@
+menu "Gateway Configuration"
+
+    menu "Wi-Fi"
+        config GATEWAY_WIFI_SSID
+            string "Wi-Fi SSID"
+            default "myssid"
+            help
+                SSID of the access point the gateway connects to.
+
+        config GATEWAY_WIFI_PASSWORD
+            string "Wi-Fi Password"
+            default "mypassword"
+            help
+                Password of the access point. Leave empty for an open network.
+
+        config GATEWAY_WIFI_MAX_RETRY_INTERVAL_MS
+            int "Max reconnect interval (ms)"
+            default 30000
+            range 1000 600000
+            help
+                The reconnect delay doubles after each failed attempt, up to this value.
+    endmenu
+
+    menu "MQTT"
+        config GATEWAY_MQTT_BROKER_URI
+            string "Broker URI"
+            default "mqtt://broker.emqx.io:1883"
+            help
+                URI of the MQTT broker, e.g. mqtt://host:1883 or mqtts://host:8883.
+
+        config GATEWAY_MQTT_USERNAME
+            string "Username"
+            default ""
+
+        config GATEWAY_MQTT_PASSWORD
+            string "Password"
+            default ""
+
+        config GATEWAY_MQTT_TOPIC_PREFIX
+            string "Topic prefix"
+            default "esp-gateway"
+            help
+                All topics are built as <prefix>/<gateway_id>/<suffix>.
+                The gateway id is derived from the station MAC address.
+
+        config GATEWAY_TELEMETRY_INTERVAL_S
+            int "Telemetry interval (s)"
+            default 30
+            range 5 3600
+            help
+                Interval for publishing gateway telemetry (uptime, heap, RSSI).
+    endmenu
+
+    menu "Sub-device UART"
+        config GATEWAY_UART_PORT
+            int "UART port"
+            default 1
+            range 0 2
+
+        config GATEWAY_UART_TX_GPIO
+            int "UART TX GPIO"
+            default 4
+
+        config GATEWAY_UART_RX_GPIO
+            int "UART RX GPIO"
+            default 5
+
+        config GATEWAY_UART_BAUD_RATE
+            int "UART baud rate"
+            default 115200
+
+        config GATEWAY_UART_LINE_MAX
+            int "Max line length (bytes)"
+            default 512
+            range 64 4096
+            help
+                Sub-devices send newline-terminated frames. Longer lines are
+                forwarded in chunks of this size.
+    endmenu
+
+    menu "Indicator and button"
+        config GATEWAY_LED_GPIO
+            int "Status LED GPIO (-1 to disable)"
+            default 2
+            range -1 48
+
+        config GATEWAY_LED_ACTIVE_HIGH
+            bool "LED is on when GPIO is high"
+            default y
+
+        config GATEWAY_BUTTON_GPIO
+            int "Button GPIO (-1 to disable)"
+            default 0
+            range -1 48
+            help
+                Single click publishes a button event, long press (5 s) reboots the gateway.
+
+        config GATEWAY_BUTTON_ACTIVE_LEVEL
+            int "Button active level"
+            default 0
+            range 0 1
+    endmenu
+
+endmenu
