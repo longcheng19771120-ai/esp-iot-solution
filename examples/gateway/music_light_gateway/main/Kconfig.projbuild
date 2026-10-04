@@ -1,0 +1,131 @@
+menu "Music Light Gateway"
+
+    menu "Wi-Fi"
+        config GATEWAY_WIFI_SSID
+            string "Wi-Fi SSID"
+            default "myssid"
+            help
+                SSID of the access point the gateway connects to.
+
+        config GATEWAY_WIFI_PASSWORD
+            string "Wi-Fi Password"
+            default "mypassword"
+            help
+                Password of the access point. Leave empty for an open network.
+
+        config GATEWAY_WIFI_MAX_RETRY_INTERVAL_MS
+            int "Max reconnect interval (ms)"
+            default 30000
+            range 1000 600000
+            help
+                The reconnect delay doubles after each failed attempt, up to this value.
+    endmenu
+
+    menu "MQTT"
+        config GATEWAY_MQTT_BROKER_URI
+            string "Broker URI"
+            default "mqtt://broker.emqx.io:1883"
+            help
+                URI of the MQTT broker, e.g. mqtt://host:1883 or mqtts://host:8883.
+
+        config GATEWAY_MQTT_USERNAME
+            string "Username"
+            default ""
+
+        config GATEWAY_MQTT_PASSWORD
+            string "Password"
+            default ""
+
+        config GATEWAY_MQTT_TOPIC_PREFIX
+            string "Topic prefix"
+            default "music-light"
+            help
+                All topics are built as <prefix>/<gateway_id>/<suffix>.
+                The gateway id is derived from the station MAC address.
+
+        config GATEWAY_TELEMETRY_INTERVAL_S
+            int "Telemetry interval (s)"
+            default 30
+            range 5 3600
+            help
+                Interval for publishing gateway telemetry (uptime, heap, RSSI).
+    endmenu
+
+    menu "Microphone"
+        config AUDIO_I2S_BCLK_GPIO
+            int "I2S BCLK (SCK) GPIO"
+            default 4
+
+        config AUDIO_I2S_WS_GPIO
+            int "I2S WS (LRCLK) GPIO"
+            default 5
+
+        config AUDIO_I2S_DIN_GPIO
+            int "I2S data in (SD) GPIO"
+            default 6
+
+        config AUDIO_MIC_SLOT_RIGHT
+            bool "Microphone outputs on the right slot (L/R pin high)"
+            default n
+
+        config AUDIO_SAMPLE_RATE
+            int "Sample rate (Hz)"
+            default 16000
+            range 8000 48000
+            help
+                16 kHz covers the bands used for beat and genre analysis.
+
+        config AUDIO_SILENCE_DB
+            int "Silence threshold (dBFS)"
+            default -55
+            range -90 -10
+            help
+                Sound quieter than this is treated as silence and the light
+                falls back to a dim idle breathing effect. Raise it in noisy rooms.
+    endmenu
+
+    menu "RGBW light"
+        config LIGHT_R_GPIO
+            int "Red PWM GPIO"
+            default 38
+
+        config LIGHT_G_GPIO
+            int "Green PWM GPIO"
+            default 39
+
+        config LIGHT_B_GPIO
+            int "Blue PWM GPIO"
+            default 40
+
+        config LIGHT_W_GPIO
+            int "White PWM GPIO"
+            default 41
+
+        config LIGHT_ACTIVE_HIGH
+            bool "Driver dim input is active high"
+            default y
+
+        config LIGHT_PWM_FREQ_HZ
+            int "PWM frequency (Hz)"
+            default 19500
+            range 500 19500
+            help
+                Above the audible range so the driver and LEDs do not whine.
+                Duty resolution is fixed at 12 bits, which limits this to 19.5 kHz.
+
+        config LIGHT_MAX_POWER_PERCENT
+            int "Max duty per channel (%)"
+            default 100
+            range 5 100
+            help
+                Caps every channel to stay within the thermal budget of the board.
+    endmenu
+
+    config GATEWAY_BUTTON_GPIO
+        int "Button GPIO (-1 to disable)"
+        default 0
+        range -1 48
+        help
+            Single click cycles the light mode (music, static, off), long press (5 s) reboots.
+
+endmenu
