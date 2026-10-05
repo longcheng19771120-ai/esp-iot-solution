@@ -105,6 +105,13 @@ void light_set_mood(const mood_t *mood)
     portEXIT_CRITICAL(&s_lock);
 }
 
+void light_set_genre(music_genre_t genre)
+{
+    portENTER_CRITICAL(&s_lock);
+    light_effect_set_genre(&s_fx, genre);
+    portEXIT_CRITICAL(&s_lock);
+}
+
 void light_set_mode(light_mode_t mode)
 {
     if (mode >= LIGHT_MODE_MAX) {
@@ -143,10 +150,11 @@ int light_get_state_json(char *buf, size_t size)
     light_mode_t mode = s_fx.mode;
     rgbw_t c = s_fx.static_color;
     float bri = s_fx.brightness;
+    music_genre_t genre = s_fx.genre;
     portEXIT_CRITICAL(&s_lock);
 
-    return snprintf(buf, size, "{\"mode\":\"%s\",\"brightness\":%d,\"color\":[%d,%d,%d,%d]}",
-                    light_mode_name(mode), (int)lroundf(bri * 100), (int)lroundf(c.r * 255), (int)lroundf(c.g * 255),
+    return snprintf(buf, size, "{\"mode\":\"%s\",\"genre\":\"%s\",\"brightness\":%d,\"color\":[%d,%d,%d,%d]}",
+                    light_mode_name(mode), genre_name(genre), (int)lroundf(bri * 100), (int)lroundf(c.r * 255), (int)lroundf(c.g * 255),
                     (int)lroundf(c.b * 255), (int)lroundf(c.w * 255));
 }
 
@@ -155,6 +163,7 @@ void light_get_status(light_status_t *status)
     portENTER_CRITICAL(&s_lock);
     status->mode = s_fx.mode;
     status->brightness = s_fx.brightness;
+    status->genre = s_fx.genre;
     status->out = s_fx.out;
     status->mood.silent = s_fx.silence > 0.5f;
     status->mood.valence = s_fx.valence;

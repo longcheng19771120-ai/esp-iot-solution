@@ -58,7 +58,7 @@ static bool s_have_music;
 static lv_obj_t *s_arc;
 static lv_obj_t *s_disc;
 static lv_obj_t *s_dot;
-static lv_obj_t *s_mood_label;
+static lv_obj_t *s_title_label;
 static lv_obj_t *s_bpm_label;
 static lv_obj_t *s_detail_label;
 static lv_obj_t *s_mode_label;
@@ -91,14 +91,24 @@ static lv_color_t screen_color(const rgbw_t *c, float *level)
     return lv_color_make((uint8_t)(255 * r / peak), (uint8_t)(255 * g / peak), (uint8_t)(255 * b / peak));
 }
 
-static const char *mood_title(const light_status_t *st)
+static const char *const s_mood_names[MOOD_MAX] = {
+    [MOOD_SILENCE] = "Quiet",
+    [MOOD_CALM] = "Calm",
+    [MOOD_HAPPY] = "Happy",
+    [MOOD_TENSE] = "Tense",
+    [MOOD_SAD] = "Sad",
+};
+
+static const char *title(const light_status_t *st)
 {
-    static const char *const names[MOOD_MAX] = {
-        [MOOD_SILENCE] = "Quiet",
-        [MOOD_CALM] = "Calm",
-        [MOOD_HAPPY] = "Happy",
-        [MOOD_TENSE] = "Tense",
-        [MOOD_SAD] = "Sad",
+    static const char *const genres[MUSIC_GENRE_MAX] = {
+        [MUSIC_GENRE_SILENCE] = "Quiet",
+        [MUSIC_GENRE_AMBIENT] = "Ambient",
+        [MUSIC_GENRE_CLASSICAL] = "Classical",
+        [MUSIC_GENRE_POP] = "Pop",
+        [MUSIC_GENRE_ROCK] = "Rock",
+        [MUSIC_GENRE_ELECTRONIC] = "Electronic",
+        [MUSIC_GENRE_HIPHOP] = "Hip-hop",
     };
     switch (st->mode) {
     case LIGHT_MODE_STATIC:
@@ -106,7 +116,7 @@ static const char *mood_title(const light_status_t *st)
     case LIGHT_MODE_OFF:
         return "Off";
     default:
-        return names[mood_quadrant(&st->mood)];
+        return st->mood.silent || st->genre >= MUSIC_GENRE_MAX ? "Quiet" : genres[st->genre];
     }
 }
 
@@ -137,9 +147,9 @@ static void refresh_cb(lv_timer_t *timer)
         lv_obj_add_flag(s_dot, LV_OBJ_FLAG_HIDDEN);
     }
 
-    lv_label_set_text(s_mood_label, mood_title(&st));
+    lv_label_set_text(s_title_label, title(&st));
     if (st.mode == LIGHT_MODE_MUSIC && have_music) {
-        lv_label_set_text_fmt(s_bpm_label, "%d BPM", (int)lroundf(bpm));
+        lv_label_set_text_fmt(s_bpm_label, "%s, %d BPM", s_mood_names[mood_quadrant(&st.mood)], (int)lroundf(bpm));
         /* LVGL's own formatter has no float support */
         lv_label_set_text_fmt(s_detail_label, "valence %d%%  energy %d%%", (int)lroundf(st.mood.valence * 100),
                               (int)lroundf(st.mood.energy * 100));
@@ -217,9 +227,9 @@ static void build_ui(lv_display_t *disp)
     lv_label_set_text(s_link_label, LV_SYMBOL_WIFI);
     lv_obj_align(s_link_label, LV_ALIGN_CENTER, 0, -140);
 
-    s_mood_label = lv_label_create(scr);
-    lv_obj_set_style_text_font(s_mood_label, &lv_font_montserrat_28, 0);
-    lv_obj_align(s_mood_label, LV_ALIGN_CENTER, 0, -105);
+    s_title_label = lv_label_create(scr);
+    lv_obj_set_style_text_font(s_title_label, &lv_font_montserrat_28, 0);
+    lv_obj_align(s_title_label, LV_ALIGN_CENTER, 0, -105);
 
     s_bpm_label = lv_label_create(scr);
     lv_obj_set_style_text_font(s_bpm_label, &lv_font_montserrat_20, 0);

@@ -16,6 +16,10 @@
  */
 #define SAMPLE_RATE CONFIG_AUDIO_SAMPLE_RATE
 
+/* A new genre takes over after two agreeing windows, or one confident one */
+#define GENRE_STABLE_WINDOWS 2
+#define GENRE_FAST_CONFIDENCE 0.8f
+
 static const char *TAG = "audio";
 
 static i2s_chan_handle_t s_rx;
@@ -27,6 +31,8 @@ static void audio_task(void *arg)
     static float samples[MA_HOP_SIZE];
     music_frame_t frame;
     music_features_t features;
+    music_genre_t current = MUSIC_GENRE_SILENCE, candidate = MUSIC_GENRE_SILENCE;
+    int candidate_count = 0;
 
     while (1) {
         size_t got = 0;
@@ -46,12 +52,28 @@ static void audio_task(void *arg)
         /* The light smooths the mood itself, so every window is passed on */
         mood_t mood = mood_estimate(&features);
         light_set_mood(&mood);
-        ESP_LOGI(TAG, "%-7s valence %.2f energy %.2f | mode %+.2f key %.2f | bpm %5.1f reg %.2f | "
-                 "onsets %.1f/s | %5.1f dBFS", mood_quadrant_name(mood_quadrant(&mood)), mood.valence, mood.energy,
-                 features.mode, features.key_strength, features.bpm, features.regularity, features.onset_rate,
+        genre_result_t res = genre_classify(&features);
+        ESP_LOGI(TAG, "%-10s conf %.2f | %-7s valence %.2f energy %.2f | mode %+.2f key %.2f | bpm %5.1f reg %.2f | "
+                 "onsets %.1f/s | %5.1f dBFS", genre_name(res.genre), res.confidence,
+                 mood_quadrant_name(mood_quadrant(&mood)), mood.valence, mood.energy, features.mode,
+                 features.key_strength, features.bpm, features.regularity, features.onset_rate,
                  features.level_db_mean);
+
+        if (res.genre == candidate) {
+            candidate_count++;
+        } else {
+            candidate = res.genre;
+            candidate_count = 1;
+        }
+        if (candidate != current &&
+                (candidate_count >= GENRE_STABLE_WINDOWS || res.confidence >= GENRE_FAST_CONFIDENCE)) {
+            ESP_LOGI(TAG, "Genre: %s -> %s", genre_name(current), genre_name(candidate));
+            current = candidate;
+            light_set_genre(current);
+            gateway_mqtt_publish_light_state();
+        }
         display_show_music(&mood, &features);
-        gateway_mqtt_publish_music(&mood, &features);
+        gateway_mqtt_publish_music(current, res.confidence, &mood, &features);
     }
 }
 

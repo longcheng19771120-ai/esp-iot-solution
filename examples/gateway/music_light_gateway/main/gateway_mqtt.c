@@ -5,6 +5,7 @@
  */
 
 #include <stdio.h>
+#include <stdlib.h>
 #include <string.h>
 #include <inttypes.h>
 #include "freertos/FreeRTOS.h"
@@ -41,8 +42,9 @@ static char s_topic_cmd[TOPIC_LEN];
 static char s_topic_resp[TOPIC_LEN];
 
 /* Calibration: label attached to /music messages, see host_test/collect_mqtt.py */
-static bool s_labelled;
+static bool s_labelled;                 /* mood label set */
 static float s_label_valence, s_label_energy;
+static music_genre_t s_label_genre = MUSIC_GENRE_MAX;   /* MAX = no genre label */
 static int s_label_session;
 static portMUX_TYPE s_label_lock = portMUX_INITIALIZER_UNLOCKED;
 
@@ -61,37 +63,58 @@ static esp_err_t publish(const char *topic, const char *data, size_t len, int qo
     return msg_id < 0 ? ESP_FAIL : ESP_OK;
 }
 
-esp_err_t gateway_mqtt_publish_music(const mood_t *mood, const music_features_t *f)
+static int append_vector(char *buf, int n, int size, const char *key, const float *v, int count)
 {
-    char buf[512];
+    n += snprintf(buf + n, size - n, ",\"%s\":[", key);
+    for (int i = 0; i < count && n < size; i++) {
+        n += snprintf(buf + n, size - n, "%s%.4f", i ? "," : "", v[i]);
+    }
+    if (n < size) {
+        n += snprintf(buf + n, size - n, "]");
+    }
+    return n;
+}
+
+esp_err_t gateway_mqtt_publish_music(music_genre_t genre, float genre_confidence, const mood_t *mood,
+                                     const music_features_t *f)
+{
+    char buf[768];
     bool labelled;
     float label_v, label_e;
+    music_genre_t label_genre;
     int session;
-    float v[MOOD_FEATURE_COUNT];
+    float v[MOOD_FEATURE_COUNT], gv[GENRE_FEATURE_COUNT];
 
     portENTER_CRITICAL(&s_label_lock);
     labelled = s_labelled;
+    label_genre = s_label_genre;
     label_v = s_label_valence;
     label_e = s_label_energy;
     session = s_label_session;
     portEXIT_CRITICAL(&s_label_lock);
 
     int n = snprintf(buf, sizeof(buf),
-                     "{\"mood\":\"%s\",\"valence\":%.2f,\"energy\":%.2f,\"bpm\":%.1f,\"regularity\":%.2f,"
+                     "{\"genre\":\"%s\",\"genre_conf\":%.2f,\"mood\":\"%s\",\"valence\":%.2f,\"energy\":%.2f,\"bpm\":%.1f,\"regularity\":%.2f,"
                      "\"mode\":%.2f,\"key_strength\":%.2f,\"level_db\":%.1f,\"onsets_per_s\":%.2f,"
-                     "\"bass\":%.2f,\"mid\":%.2f,\"high\":%.2f,\"silent\":%.2f,\"vec\":[",
-                     mood_quadrant_name(mood_quadrant(mood)), mood->valence, mood->energy, f->bpm, f->regularity,
+                     "\"bass\":%.2f,\"mid\":%.2f,\"high\":%.2f,\"silent\":%.2f",
+                     genre_name(genre), genre_confidence, mood_quadrant_name(mood_quadrant(mood)), mood->valence, mood->energy, f->bpm, f->regularity,
                      f->mode, f->key_strength, f->level_db_mean, f->onset_rate, f->bass_ratio, f->mid_ratio,
                      f->high_ratio, f->silent_ratio);
     mood_feature_vector(f, v);
-    for (int i = 0; i < MOOD_FEATURE_COUNT && n < (int)sizeof(buf); i++) {
-        n += snprintf(buf + n, sizeof(buf) - n, "%s%.4f", i ? "," : "", v[i]);
-    }
+    genre_feature_vector(f, gv);
+    n = append_vector(buf, n, sizeof(buf), "vec", v, MOOD_FEATURE_COUNT);
+    n = append_vector(buf, n, sizeof(buf), "gvec", gv, GENRE_FEATURE_COUNT);
     if (n < (int)sizeof(buf) && labelled) {
-        n += snprintf(buf + n, sizeof(buf) - n, "],\"label\":[%.2f,%.2f],\"session\":%d}", label_v, label_e,
-                      session);
-    } else if (n < (int)sizeof(buf)) {
-        n += snprintf(buf + n, sizeof(buf) - n, "]}");
+        n += snprintf(buf + n, sizeof(buf) - n, ",\"label\":[%.2f,%.2f]", label_v, label_e);
+    }
+    if (n < (int)sizeof(buf) && label_genre < MUSIC_GENRE_MAX) {
+        n += snprintf(buf + n, sizeof(buf) - n, ",\"genre_label\":\"%s\"", genre_name(label_genre));
+    }
+    if (n < (int)sizeof(buf) && (labelled || label_genre < MUSIC_GENRE_MAX)) {
+        n += snprintf(buf + n, sizeof(buf) - n, ",\"session\":%d", session);
+    }
+    if (n < (int)sizeof(buf)) {
+        n += snprintf(buf + n, sizeof(buf) - n, "}");
     }
     if (n >= (int)sizeof(buf)) {
         return ESP_ERR_INVALID_SIZE;
@@ -132,9 +155,61 @@ static int build_telemetry(char *buf, size_t size)
  *   mode music|static|off
  *   color <r> <g> <b> <w>     0..255 each, switches to static mode
  *   brightness <0..100>
- *   label <calm|happy|tense|sad>|<valence> <energy>|none
- *                             tag /music messages for calibration
+ *   label [<genre>] [<calm|happy|tense|sad>|<valence> <energy>] | none
+ *                             tag /music messages for calibration, e.g. "label rock", "label pop happy"
  */
+static music_genre_t genre_from_name(const char *name)
+{
+    for (int g = 0; g < MUSIC_GENRE_MAX; g++) {
+        if (strcmp(name, genre_name((music_genre_t)g)) == 0) {
+            return (music_genre_t)g;
+        }
+    }
+    return MUSIC_GENRE_MAX;
+}
+
+/* "rock", "happy", "rock happy", "pop 0.8 0.7" or "none" */
+static bool parse_label(char *args)
+{
+    music_genre_t genre = MUSIC_GENRE_MAX;
+    bool has_mood = false;
+    float lv = 0, le = 0, nums[2];
+    int num_count = 0;
+
+    if (strcmp(args, "none") != 0) {
+        for (char *save = NULL, *tok = strtok_r(args, " ", &save); tok; tok = strtok_r(NULL, " ", &save)) {
+            char *end;
+            float x = strtof(tok, &end);
+            if (*end == '\0' && num_count < 2) {
+                nums[num_count++] = x;
+            } else if (genre == MUSIC_GENRE_MAX && genre_from_name(tok) < MUSIC_GENRE_MAX) {
+                genre = genre_from_name(tok);
+            } else if (!has_mood && mood_quadrant_target(tok, &lv, &le)) {
+                has_mood = true;
+            } else {
+                return false;
+            }
+        }
+        if (num_count == 2 && !has_mood) {
+            has_mood = true;
+            lv = nums[0];
+            le = nums[1];
+        } else if (num_count != 0 || (genre == MUSIC_GENRE_MAX && !has_mood)) {
+            return false;
+        }
+    }
+
+    portENTER_CRITICAL(&s_label_lock);
+    s_labelled = has_mood;
+    s_label_valence = lv;
+    s_label_energy = le;
+    s_label_genre = genre;
+    /* Every label command starts a new session, so each song can be told apart */
+    s_label_session++;
+    portEXIT_CRITICAL(&s_label_lock);
+    return true;
+}
+
 static void handle_cmd(const char *data, int len)
 {
     char cmd[64], buf[256], arg[16];
@@ -179,19 +254,11 @@ static void handle_cmd(const char *data, int len)
     } else if (sscanf(cmd, "brightness %d", &v) == 1) {
         light_set_brightness(v / 100.0f);
     } else if (strncmp(cmd, "label ", 6) == 0) {
-        float lv, le;
-        bool none = strcmp(cmd + 6, "none") == 0;
-        if (!none && !mood_quadrant_target(cmd + 6, &lv, &le) && sscanf(cmd + 6, "%f %f", &lv, &le) != 2) {
-            reply("error: label must be calm, happy, tense, sad, '<valence> <energy>' or none");
+        if (!parse_label(cmd + 6)) {
+            reply("error: label takes a genre, a mood (calm, happy, tense, sad or '<valence> <energy>'), "
+                  "both, or none");
             return;
         }
-        portENTER_CRITICAL(&s_label_lock);
-        s_labelled = !none;
-        s_label_valence = none ? 0 : lv;
-        s_label_energy = none ? 0 : le;
-        /* Every label command starts a new session, so each song can be told apart */
-        s_label_session++;
-        portEXIT_CRITICAL(&s_label_lock);
     } else {
         snprintf(buf, sizeof(buf), "error: unknown command: %s", cmd);
         reply(buf);

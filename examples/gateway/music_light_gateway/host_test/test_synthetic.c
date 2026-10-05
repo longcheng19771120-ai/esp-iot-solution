@@ -4,13 +4,14 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-/* Synthetic signals with known tempo, harmony and character: checks tempo, mode and mood ordering */
+/* Synthetic signals with known tempo, harmony and character: checks tempo, genre, mode and mood ordering */
 
 #include <stdio.h>
 #include <stdlib.h>
 #include <math.h>
 #include "music_analyzer.h"
 #include "mood_estimator.h"
+#include "genre_classifier.h"
 #define SR 16000
 static float noise(void)
 {
@@ -103,13 +104,16 @@ typedef struct {
     int silent;
 } result_t;
 
-/* Analyse 3 windows, expect the tempo within 4% in 2 of them (0 = don't care), return mean mood */
-static result_t run(const char *name, gen_t g, float want_bpm)
+/*
+ * Analyse 3 windows, expect the genre and the tempo within 4% in 2 of them
+ * (MUSIC_GENRE_MAX and 0 = don't care), return the mean mood
+ */
+static result_t run(const char *name, gen_t g, music_genre_t want, float want_bpm)
 {
     static music_analyzer_t ma;
     music_analyzer_init(&ma, SR, -65);
     float hop[MA_HOP_SIZE];
-    int n = 0, bpm_hits = 0;
+    int n = 0, bpm_hits = 0, genre_hits = 0;
     music_frame_t fr;
     music_features_t f;
     result_t res = {0};
@@ -123,6 +127,8 @@ static result_t run(const char *name, gen_t g, float want_bpm)
         }
         w++;
         mood_t m = mood_estimate(&f);
+        genre_result_t r = genre_classify(&f);
+        genre_hits += want == MUSIC_GENRE_MAX || r.genre == want;
         res.valence += m.valence / 3;
         res.energy += m.energy / 3;
         res.mode += f.mode / 3;
@@ -134,11 +140,12 @@ static result_t run(const char *name, gen_t g, float want_bpm)
                 break;
             }
         }
-        printf("%-10s win%d: %-7s valence %.2f energy %.2f | mode %+.2f key strength %.2f | bpm %6.1f\n", name, w,
-               mood_quadrant_name(mood_quadrant(&m)), m.valence, m.energy, f.mode, f.key_strength, f.bpm);
+        printf("%-10s win%d: %-10s | %-7s valence %.2f energy %.2f | mode %+.2f key strength %.2f | bpm %6.1f\n", name, w,
+               genre_name(r.genre), mood_quadrant_name(mood_quadrant(&m)), m.valence, m.energy, f.mode, f.key_strength, f.bpm);
     }
-    if (bpm_hits < 2) {
-        printf("FAIL %s: expected %.0f bpm\n", name, want_bpm);
+    if (bpm_hits < 2 || genre_hits < 2) {
+        printf("FAIL %s: expected %s at %.0f bpm\n", name, want < MUSIC_GENRE_MAX ? genre_name(want) : "any genre",
+               want_bpm);
         failures++;
     }
     return res;
@@ -154,14 +161,14 @@ static void expect(int ok, const char *what)
 
 int main(void)
 {
-    result_t silence = run("silence", g_silence, 0);
-    result_t edm = run("edm128", g_edm, 128);
-    result_t hiphop = run("hiphop90", g_hiphop, 90);
-    result_t rock = run("rock140", g_rock, 140);
-    result_t classical = run("classical", g_classical, 0);
-    result_t ambient = run("ambient", g_ambient, 0);
-    result_t major = run("major", g_major, 0);
-    result_t minor = run("minor", g_minor, 0);
+    result_t silence = run("silence", g_silence, MUSIC_GENRE_SILENCE, 0);
+    result_t edm = run("edm128", g_edm, MUSIC_GENRE_ELECTRONIC, 128);
+    result_t hiphop = run("hiphop90", g_hiphop, MUSIC_GENRE_HIPHOP, 90);
+    result_t rock = run("rock140", g_rock, MUSIC_GENRE_ROCK, 140);
+    result_t classical = run("classical", g_classical, MUSIC_GENRE_CLASSICAL, 0);
+    result_t ambient = run("ambient", g_ambient, MUSIC_GENRE_AMBIENT, 0);
+    result_t major = run("major", g_major, MUSIC_GENRE_MAX, 0);
+    result_t minor = run("minor", g_minor, MUSIC_GENRE_MAX, 0);
 
     expect(silence.silent == 3, "silence is silent");
     expect(edm.energy > ambient.energy + 0.3f && edm.energy > classical.energy + 0.3f, "edm more energetic than calm music");

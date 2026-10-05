@@ -2,11 +2,11 @@
 
 [中文版](README_CN.md)
 
-An ESP32-S3 listens through a digital microphone to music played by an external speaker, detects beats and estimates the mood (valence) and energy of the music locally, drives an RGBW constant-current light with four PWM channels, and reports and takes commands over Wi-Fi/MQTT.
+An ESP32-S3 listens through a digital microphone to music played by an external speaker, detects beats, the genre and the mood (valence and energy) of the music locally, drives an RGBW constant-current light with four PWM channels, and reports and takes commands over Wi-Fi/MQTT.
 
 ```
 external speaker (AirPlay etc.) -> MEMS mic -> I2S -> beat / loudness (every 16 ms)
-                                                   -> mood + energy (every 5 s) -> light effects -> 4x PWM -> RGBW driver
+                                                   -> genre + mood (every 5 s) -> light effects -> 4x PWM -> RGBW driver
                                                                        \-> MQTT
 ```
 
@@ -18,12 +18,13 @@ external speaker (AirPlay etc.) -> MEMS mic -> I2S -> beat / loudness (every 16 
 | Beats | 512-point FFT with a 256-sample hop (16 ms); log spectral flux with an adaptive threshold for onsets; autocorrelation for BPM |
 | Loudness | Per-hop RMS with auto gain, so the full brightness range is used at any volume |
 | Key | Every 64 ms a 2048-point FFT is folded into a 12-tone chroma profile; at the end of each window it is matched against major and minor key profiles (Krumhansl-Kessler), giving the key, how major or minor it sounds, and how tonal the music is |
+| Genre | Every 5.12 s the window is classified as silence / ambient / classical / pop / rock / electronic / hip-hop from tempo, beat regularity, percussiveness, onset rate, band shares, dynamic range and brightness. A new genre takes over after two agreeing windows or one confident one |
 | Mood | Every 5.12 s the window is summarised into 11 features: tempo, beat regularity, percussiveness, onset rate, low/mid/high energy share, dynamic range, brightness, major/minor and key strength. These map to two continuous values from 0 to 1: valence (sad to happy) and energy (calm to intense) |
-| Effects | Valence and energy pick a color blended from four corners (calm: warm white and amber, happy: orange and pink, tense: red and purple, sad: blue and teal). Energy also sets how hard beats flash, how fast colors fade and how often the accent color swaps in. Mood changes are smoothed over a few seconds; warm-white breathing when quiet |
-| Display | Round 360×360 touch screen (LVGL): mood, BPM, a glowing disc that mirrors the light, and a dot placing the music on the valence × energy plane. Drag the ring to set brightness, tap the button to cycle the mode |
+| Effects | The genre picks the palette and its rhythm: blues and violet drifting slowly for ambient, warm white and amber for classical, bright multi-color on every other beat for pop, red and orange for rock, neon colors on every beat for electronic, violet, gold and red for hip-hop. Mood adjusts it: happy music turns warm hues toward gold and adds warm white, sad music turns cool hues toward blue, mutes warm ones and removes white, with the shift capped so each genre keeps its colors. Energy speeds up or slows down the genre's color changes and fades and scales its beat flashes. Warm-white breathing when quiet |
+| Display | Round 360×360 touch screen (LVGL): genre, mood, BPM, a glowing disc that mirrors the light, and a dot placing the music on the valence × energy plane. Drag the ring to set brightness, tap the button to cycle the mode |
 | Output | LEDC 12-bit PWM at 19.5 kHz (above audible), gamma 2.2, configurable duty cap for the thermal budget |
 
-**Note:** the default mood estimate is a rule-based baseline. Major/minor detection works on real recordings, but on 8 real tracks with simulated room pickup the quadrant (calm / happy / tense / sad) matched a subjective label in about half of the 5 s windows, with an average error of about 0.2 on each axis. A typical miss is energetic orchestral music without drums, such as a Hungarian Dance, which reads as sad rather than tense. Mood is subjective, so calibrate it with recordings from your own room and your own labels (see below).
+**Note:** both estimates are rule-based baselines. The genre rules get 89 of 200 five-second windows right on 8 real tracks, clean and with simulated room pickup; most confusions are between genres with similar lighting, such as classical and ambient, or hip-hop and electronic. Major/minor detection works on real recordings, but on 8 real tracks with simulated room pickup the quadrant (calm / happy / tense / sad) matched a subjective label in about half of the 5 s windows, with an average error of about 0.2 on each axis. A typical miss is energetic orchestral music without drums, such as a Hungarian Dance, which reads as sad rather than tense. Calibrate both with recordings from your own room and your own labels (see below).
 
 ## Suggested Pins (ESP32-S3-WROOM-1 N16R8)
 
@@ -47,8 +48,8 @@ GPIO 38–41 double as external JTAG pins; debugging over the built-in USB-JTAG 
 | Topic | Direction | Content |
 |-------|-----------|---------|
 | `<base>/status` | up | Retained `online` / `offline` (LWT) |
-| `<base>/music` | up | Every 5 s: mood quadrant, valence, energy, BPM, regularity, mode, key strength, level, band shares, feature vector |
-| `<base>/light/state` | up | Retained: mode, brightness, static color |
+| `<base>/music` | up | Every 5 s: genre and confidence, mood quadrant, valence, energy, BPM, regularity, mode, key strength, level, band shares, feature vectors |
+| `<base>/light/state` | up | Retained: mode, current genre, brightness, static color |
 | `<base>/telemetry` | up | Uptime, heap, RSSI |
 | `<base>/cmd` | down | See below |
 | `<base>/resp` | up | Command replies |
@@ -58,7 +59,7 @@ GPIO 38–41 double as external JTAG pins; debugging over the built-in USB-JTAG 
 | `mode music` / `mode static` / `mode off` | Switch mode |
 | `color 255 120 0 50` | Static R G B W (0–255), switches to static mode |
 | `brightness 60` | Brightness 0–100 |
-| `label happy` / `label 0.3 0.9` / `label none` | Tag the following `/music` messages with a mood (`calm`, `happy`, `tense`, `sad`, or valence and energy from 0 to 1), for calibration |
+| `label rock happy` / `label pop 0.3 0.9` / `label none` | Tag the following `/music` messages for calibration with a genre (`ambient`, `classical`, `pop`, `rock`, `electronic`, `hiphop`), a mood (`calm`, `happy`, `tense`, `sad`, or valence and energy from 0 to 1), or both |
 | `ping` / `info` / `reboot` | Diagnostics |
 
 ## Build
@@ -85,39 +86,41 @@ The firmware enables octal PSRAM (as on the N16R8 module) and still boots if non
 
 A typical MEMS microphone reads -26 dBFS at 94 dB SPL, so music at 60–80 dB SPL arrives at about -60 to -40 dBFS and a quiet room is below -80 dBFS. The default threshold is -65 dBFS. Check `level_db` in the `/music` messages: it should sit clearly above the threshold while music plays and below it otherwise; adjust `AUDIO_SILENCE_DB` in menuconfig if not.
 
-## Calibrating Mood Detection
+## Calibrating Genre and Mood Detection
 
 The analysis code has no ESP-IDF dependencies and builds on a PC.
 
-1. **Collect.** Recording through the gateway's own microphone in the real room works best. Play at least 3 different songs per mood quadrant, at least a minute each, and label each with how it feels to you:
+1. **Collect.** Recording through the gateway's own microphone in the real room works best. Play at least 3 different songs per genre and per mood quadrant you care about, at least a minute each, and label each song with its genre and how it feels to you:
 
    ```bash
    cd host_test
    pip install paho-mqtt
-   python3 collect_mqtt.py --broker <broker> --id <gateway_id> -o room.csv
+   python3 collect_mqtt.py --broker <broker> --id <gateway_id> -g genre.csv -m mood.csv
    # send for every new song, even with the same label, so songs can be told apart:
-   mosquitto_pub -h <broker> -t 'music-light/<gateway_id>/cmd' -m 'label happy'
-   # or exact values, valence then energy:
-   mosquitto_pub -h <broker> -t 'music-light/<gateway_id>/cmd' -m 'label 0.3 0.9'
+   mosquitto_pub -h <broker> -t 'music-light/<gateway_id>/cmd' -m 'label rock happy'
+   # genre only, mood only, or exact mood values (valence then energy) work too:
+   mosquitto_pub -h <broker> -t 'music-light/<gateway_id>/cmd' -m 'label pop 0.3 0.9'
    # when done:
    mosquitto_pub -h <broker> -t 'music-light/<gateway_id>/cmd' -m 'label none'
    ```
 
-   WAV files work too: `./analyze_wav --csv happy song.wav >> room.csv` or `--csv 0.3,0.9` (convert first with `ffmpeg -i song.mp3 -ac 1 -ar 16000 -sample_fmt s16 song.wav`).
+   WAV files work too: `./analyze_wav --csv rock song.wav >> genre.csv`, `./analyze_wav --csv happy song.wav >> mood.csv` or `--csv 0.3,0.9` (convert first with `ffmpeg -i song.mp3 -ac 1 -ar 16000 -sample_fmt s16 song.wav`).
 
-2. **Fit and evaluate.** The script reports leave-one-song-out errors, so every song is judged by a model that never heard it, next to the error of the built-in estimate on the same data:
-
-   ```bash
-   python3 fit_mood_model.py room.csv
-   ```
-
-3. **Build it in.** Only when the fitted model beats the built-in one, generate the model header and rebuild; the firmware switches to the trained model automatically:
+2. **Fit and evaluate.** Both scripts score leave-one-song-out, so every song is judged by a model that never heard it; the mood script also shows the error of the built-in estimate on the same data:
 
    ```bash
-   python3 fit_mood_model.py room.csv -o ../main/mood_model.h
+   python3 fit_genre_model.py genre.csv
+   python3 fit_mood_model.py mood.csv
    ```
 
-With only a handful of songs the fitted model usually does worse than the built-in rules, and the script warns when a quadrant has fewer than 3 songs. Also available: `make test` runs the synthetic self test, and `./analyze_wav song.wav` prints the same per-window analysis as the device.
+3. **Build it in.** Only when a fitted model beats the built-in rules, generate its header and rebuild; the firmware switches to the trained model automatically:
+
+   ```bash
+   python3 fit_genre_model.py genre.csv -o ../main/genre_model.h
+   python3 fit_mood_model.py mood.csv -o ../main/mood_model.h
+   ```
+
+If only some genres were collected, the genre model only chooses between those. With only a handful of songs a fitted mood model usually does worse than the built-in rules, and the script warns when a quadrant has fewer than 3 songs. Also available: `make test` runs the synthetic self test, and `./analyze_wav song.wav` prints the same per-window analysis as the device.
 
 ## Next Steps
 
