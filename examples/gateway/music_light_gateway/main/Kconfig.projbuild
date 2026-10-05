@@ -202,7 +202,7 @@ menu "Music Light Gateway"
     menu "Bluetooth receiver board"
         config BT_LINK_ENABLE
             bool "Analyse music from a Bluetooth receiver board"
-            default y
+            default n
             help
                 An ESP32 board running the bt_receiver firmware (see bt_receiver/)
                 receives music from a phone over Bluetooth and plays it through an

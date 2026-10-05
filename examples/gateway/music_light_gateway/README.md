@@ -105,7 +105,7 @@ idf.py set-target esp32
 idf.py build flash monitor
 ```
 
-While the board delivers sound, or reports that it is playing, the analysis uses it instead of the microphone, and returns to the microphone 3 s after the music stops. Phones send 44.1 or 48 kHz; the gateway measures the rate from the bit clock and resamples to 16 kHz. Without the board the gateway works as before; turn the link off under *Bluetooth receiver board* in menuconfig to free the pins.
+While the board delivers sound, or reports that it is playing, the analysis uses it instead of the microphone, and returns to the microphone 3 s after the music stops. Phones send 44.1 or 48 kHz; the gateway measures the rate from the bit clock and resamples to 16 kHz. The board is optional and the link is off by default; turn it on under *Bluetooth receiver board* in menuconfig. It only helps when the phone plays to it, so the music is heard only if the board drives a speaker or the phone can send to two Bluetooth devices at once (such as Samsung Dual Audio). When music plays from the phone's own speaker or a smart speaker, the microphone is the way to listen.
 
 ## Silence Threshold
 
