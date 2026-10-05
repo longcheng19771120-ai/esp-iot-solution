@@ -7,7 +7,8 @@ An ESP32-S3 listens through a digital microphone to music played by an external 
 ```
 external speaker (AirPlay etc.) -> MEMS mic -> I2S -> beat / loudness (every 16 ms)
 phone -> Bluetooth board -> I2S ---------------/       -> genre + mood (every 5 s) -> light effects -> 4x PWM -> RGBW driver
-                         \-> amplifier -> speaker                              \-> MQTT
+                         \-> amplifier -> speaker                              |-> MQTT
+                                                                               \-> Bluetooth LE -> satellite lights
 ```
 
 ## How It Works
@@ -24,6 +25,7 @@ phone -> Bluetooth board -> I2S ---------------/       -> genre + mood (every 5 
 | Themes | `vivid` uses the saturated palettes above. `song` uses muted Chinese traditional colors in the Song dynasty style, with slower fades and softer beat flashes: celadon 天青, moon white 月白 and ink blue 黛蓝 for ambient; old-silk yellow 缃色, ivory 牙色 and sandalwood 檀色 for classical; carmine 胭脂, lotus mauve 藕荷 and gosling yellow 鹅黄 for pop; cinnabar 丹砂, ochre 赭石 and amber 黄栌 for rock; the azurite, malachite and gold of *A Thousand Li of Rivers and Mountains* for electronic; ink violet 黛紫, gold 赤金 and vermilion 朱红 for hip-hop. Switch with the `theme` command or by tapping the corona on the screen; the choice is kept across reboots |
 | Display | Round 360×360 touch screen (LVGL) on black: a solar corona in the light's color, whose rays stretch with loudness, ripple with the bass and treble and flare on each beat, around a dark moon showing the genre, mood and BPM. Drag the ring to set brightness, tap the corona to switch the color theme, tap the button to cycle the mode. A Bluetooth icon appears while a phone is connected, blue while the music comes from it |
 | Output | LEDC 12-bit PWM at 19.5 kHz (above audible), gamma 2.2, configurable duty cap for the thermal budget |
+| Light sync | The color the gateway's LEDs show is broadcast over Bluetooth LE every 20 ms, so any number of satellite lights follow in step (see below) |
 
 **Note:** both estimates are rule-based baselines. The genre rules get 89 of 200 five-second windows right on 8 real tracks, clean and with simulated room pickup; most confusions are between genres with similar lighting, such as classical and ambient, or hip-hop and electronic. Major/minor detection works on real recordings, but on 8 real tracks with simulated room pickup the quadrant (calm / happy / tense / sad) matched a subjective label in about half of the 5 s windows, with an average error of about 0.2 on each axis. A typical miss is energetic orchestral music without drums, such as a Hungarian Dance, which reads as sad rather than tense. Calibrate both with recordings from your own room and your own labels (see below).
 
@@ -85,6 +87,21 @@ The default panel is a 1.8" 360×360 ST77916 LCD on QSPI with a CST816S touch co
 ST77916 panels from different vendors sometimes need their own initialization commands; if the screen stays blank or shows wrong colors, pass the vendor's sequence through `st77916_vendor_config_t.init_cmds` in `display_ui.c`. If touches land mirrored, toggle the mirror options in menuconfig.
 
 The firmware enables octal PSRAM (as on the N16R8 module) and still boots if none is fitted. The app partition is 3 MB, which fits a 4 MB flash.
+
+## Bluetooth Light Sync
+
+The gateway's own Bluetooth LE radio broadcasts what its LEDs show, so more lights in the room follow the music in step. No extra hardware on the gateway and no pairing: the color rides in non-connectable advertising packets, sent every 20 ms and refreshed every 30 ms whenever it changes, and every satellite in range hears it at once.
+
+A satellite is any ESP32-C3, ESP32-C6 or ESP32 board with its own RGBW constant-current driver, running the firmware in [sync_light](sync_light):
+
+```bash
+cd sync_light
+idf.py set-target esp32c3
+idf.py menuconfig   # Sync light: group, R/G/B/W pins (default 4/5/6/7), power cap
+idf.py build flash monitor
+```
+
+Satellites apply the same gamma and smoothing as the gateway and fade out 3 s after the gateway goes quiet or out of range. The group (1–255, *Bluetooth light sync* in the gateway's menuconfig, *Sync light* on the satellite) keeps two gateways in neighbouring rooms apart. The packet format is in `main/light_sync_proto.h`. Range is that of Bluetooth LE indoors, typically one or two rooms.
 
 ## Bluetooth Receiver Board
 

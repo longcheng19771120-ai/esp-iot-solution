@@ -57,6 +57,10 @@ void app_main(void)
     /* Light first so the room is lit even before the network comes up */
     ESP_ERROR_CHECK(light_rgbw_start());
     ESP_ERROR_CHECK(audio_input_start());
+    /* Satellite lights are extra: the gateway's own light runs without them */
+    if (light_sync_start() != ESP_OK) {
+        ESP_LOGW("gateway", "Bluetooth light sync not started");
+    }
     /* Without the receiver board the analysis simply stays on the microphone */
     if (bt_link_start() != ESP_OK) {
         ESP_LOGW("gateway", "Bluetooth receiver link not started");

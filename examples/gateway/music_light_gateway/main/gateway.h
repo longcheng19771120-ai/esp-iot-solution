@@ -82,6 +82,9 @@ void light_next_mode(void);
 int light_get_state_json(char *buf, size_t size);
 void light_get_status(light_status_t *status);
 
+/* Bluetooth LE light sync (light_sync.c), broadcasts the light to satellite lights */
+esp_err_t light_sync_start(void);
+
 /* Round touch display (display_ui.c), no-ops when CONFIG_DISPLAY_ENABLE is off */
 esp_err_t display_start(void);
 /** Latest analysis window, shown on the next refresh */

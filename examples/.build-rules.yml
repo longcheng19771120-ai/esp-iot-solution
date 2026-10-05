@@ -207,6 +207,10 @@ examples/gateway/music_light_gateway/bt_receiver:
   enable:
     - if: IDF_TARGET in ["esp32"] and IDF_VERSION >= "5.4"
 
+examples/gateway/music_light_gateway/sync_light:
+  enable:
+    - if: IDF_TARGET in ["esp32","esp32c3","esp32c6"] and IDF_VERSION >= "5.4"
+
 examples/gateway/wifi_mqtt_gateway:
   enable:
     - if: IDF_TARGET in ["esp32","esp32s2","esp32s3","esp32c2","esp32c3","esp32c5","esp32c6","esp32c61"] and IDF_VERSION >= "5.3"

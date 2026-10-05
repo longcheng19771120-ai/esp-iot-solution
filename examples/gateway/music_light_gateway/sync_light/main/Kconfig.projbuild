@@ -1,0 +1,48 @@
+menu "Sync light"
+
+    config SYNC_GROUP
+        int "Group"
+        default 1
+        range 1 255
+        help
+            Follow only the gateway broadcasting this group (Bluetooth light sync
+            in the gateway's menuconfig).
+
+    config SYNC_R_GPIO
+        int "Red PWM GPIO"
+        default 4
+
+    config SYNC_G_GPIO
+        int "Green PWM GPIO"
+        default 5
+
+    config SYNC_B_GPIO
+        int "Blue PWM GPIO"
+        default 6
+
+    config SYNC_W_GPIO
+        int "White PWM GPIO"
+        default 7
+
+    config SYNC_ACTIVE_HIGH
+        bool "Driver dim input is active high"
+        default y
+
+    config SYNC_PWM_FREQ_HZ
+        int "PWM frequency (Hz)"
+        default 19500
+        range 500 19500
+
+    config SYNC_MAX_POWER_PERCENT
+        int "Max duty per channel (%)"
+        default 100
+        range 5 100
+
+    config SYNC_TIMEOUT_MS
+        int "Fade out after no packets for (ms)"
+        default 3000
+        range 500 60000
+        help
+            When the gateway is off or out of range, the light fades to dark.
+
+endmenu

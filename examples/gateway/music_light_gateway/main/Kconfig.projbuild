@@ -199,6 +199,27 @@ menu "Music Light Gateway"
         endif
     endmenu
 
+    menu "Bluetooth light sync"
+        config LIGHT_SYNC_ENABLE
+            bool "Broadcast the light to satellite lights over Bluetooth LE"
+            default y
+            depends on BT_NIMBLE_ENABLED
+            help
+                Sends what the gateway's own LEDs show in non-connectable Bluetooth LE
+                advertisements every 20 ms, so any number of satellite lights running
+                the sync_light firmware follow the music in step. Needs NimBLE with
+                the broadcaster role.
+
+        config LIGHT_SYNC_GROUP
+            int "Group"
+            default 1
+            range 1 255
+            depends on LIGHT_SYNC_ENABLE
+            help
+                Satellites follow only the gateway with the same group, so two
+                gateways in neighbouring rooms do not mix.
+    endmenu
+
     menu "Bluetooth receiver board"
         config BT_LINK_ENABLE
             bool "Analyse music from a Bluetooth receiver board"
