@@ -89,7 +89,7 @@ static const genre_style_t s_styles[MUSIC_GENRE_MAX] = {
 #define XIANGSE     0xF0C239    /* 缃色 pale yellow of old silk */
 #define YASE        0xEEDEB0    /* 牙色 ivory */
 #define TANSE       0xB36D61    /* 檀色 sandalwood */
-#define YANZHI      0x9D2933    /* 胭脂 rouge */
+#define YANZHI      0x9D2933    /* 胭脂 carmine */
 #define OUHE        0xC1A0B7    /* 藕荷 lotus root mauve */
 #define EHUANG      0xF2D86B    /* 鹅黄 gosling yellow */
 #define DANSHA      0xD4502F    /* 丹砂 cinnabar */
@@ -113,7 +113,7 @@ static const theme_palette_t s_song[MUSIC_GENRE_MAX] = {
     [MUSIC_GENRE_AMBIENT] = {{TRAD(TIANQING), TRAD(YUEBAI), TRAD(DAILAN), TRAD(ZHUQING)}, 4},
     /* Scholar's study: silk, ivory and sandalwood */
     [MUSIC_GENRE_CLASSICAL] = {{TRAD(XIANGSE), TRAD(YASE), TRAD(TANSE)}, 3},
-    /* Flowers: rouge, lotus, gosling yellow, celadon */
+    /* Flowers: carmine, lotus, gosling yellow, celadon */
     [MUSIC_GENRE_POP] = {{TRAD(YANZHI), TRAD(OUHE), TRAD(EHUANG), TRAD(TIANQING)}, 4},
     /* Cinnabar, ochre and amber */
     [MUSIC_GENRE_ROCK] = {{TRAD(DANSHA), TRAD(ZHESHI), TRAD(HUANGLU)}, 3},
