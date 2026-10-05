@@ -1,0 +1,31 @@
+menu "Bluetooth receiver"
+
+    config BT_RX_DEVICE_NAME
+        string "Bluetooth name"
+        default "Music Light"
+        help
+            The name phones show when pairing.
+
+    config BT_RX_I2S_BCLK_GPIO
+        int "I2S BCLK GPIO"
+        default 26
+        help
+            Goes to the amplifier BCLK and to the gateway's Bluetooth BCLK input.
+
+    config BT_RX_I2S_WS_GPIO
+        int "I2S WS (LRCLK) GPIO"
+        default 25
+
+    config BT_RX_I2S_DOUT_GPIO
+        int "I2S data out GPIO"
+        default 22
+
+    config BT_RX_UART_TX_GPIO
+        int "UART TX GPIO (to the gateway RX)"
+        default 17
+
+    config BT_RX_UART_RX_GPIO
+        int "UART RX GPIO (from the gateway TX)"
+        default 16
+
+endmenu

@@ -1,7 +1,7 @@
 # Host build of the platform independent analysis code
 SRC_DIR := ../main
 CFLAGS  := -O2 -Wall -Wextra -I$(SRC_DIR)
-LIB_SRC := $(SRC_DIR)/music_analyzer.c $(SRC_DIR)/mood_estimator.c
+LIB_SRC := $(SRC_DIR)/music_analyzer.c $(SRC_DIR)/mood_estimator.c $(SRC_DIR)/genre_classifier.c
 LIB_HDR := $(wildcard $(SRC_DIR)/*.h)
 
 all: test_synthetic analyze_wav

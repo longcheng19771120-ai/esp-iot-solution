@@ -11,6 +11,7 @@
 #include "esp_err.h"
 #include "music_analyzer.h"
 #include "mood_estimator.h"
+#include "genre_classifier.h"
 #include "light_effect.h"
 
 #ifdef __cplusplus
@@ -27,17 +28,40 @@ const char *gateway_get_id(void);
 esp_err_t gateway_mqtt_start(void);
 bool gateway_mqtt_is_connected(void);
 /** Publish the current music analysis to <prefix>/<id>/music */
-esp_err_t gateway_mqtt_publish_music(const mood_t *mood, const music_features_t *f);
+esp_err_t gateway_mqtt_publish_music(music_genre_t genre, float genre_confidence, const mood_t *mood,
+                                     const music_features_t *f);
 /** Publish the light state to <prefix>/<id>/light/state (retained) */
 esp_err_t gateway_mqtt_publish_light_state(void);
+/** Publish the Bluetooth receiver state to <prefix>/<id>/bt (retained) */
+esp_err_t gateway_mqtt_publish_bt(void);
 
 /* Microphone and analysis (audio_input.c) */
 esp_err_t audio_input_start(void);
+
+/* Bluetooth receiver board (bt_link.c), no-ops when CONFIG_BT_LINK_ENABLE is off */
+typedef struct {
+    bool connected;         /* a phone is connected to the receiver board */
+    bool playing;
+    int sample_rate;        /* measured on the I2S wires, 0 = no clock */
+    char title[64];         /* UTF-8, from the phone */
+    char artist[64];
+} bt_status_t;
+
+esp_err_t bt_link_start(void);
+/** True while the receiver board delivers music; the analysis then uses it instead of the mic */
+bool bt_link_active(void);
+/** Queue samples for bt_link_read() or stop; starting drops anything stale */
+void bt_link_set_consuming(bool on);
+/** Mono samples at CONFIG_AUDIO_SAMPLE_RATE, false if they did not arrive in time */
+bool bt_link_read(float *samples, int count, int timeout_ms);
+void bt_link_get_status(bt_status_t *status);
 
 /* RGBW output (light_rgbw.c), all functions are thread safe */
 typedef struct {
     light_mode_t mode;
     float brightness;       /* user brightness 0..1 */
+    music_genre_t genre;    /* genre the palette follows */
+    light_theme_t theme;
     rgbw_t out;             /* what the LEDs show right now, before gamma */
     mood_t mood;            /* smoothed mood the color follows */
 } light_status_t;
@@ -45,6 +69,10 @@ typedef struct {
 esp_err_t light_rgbw_start(void);
 void light_on_frame(const music_frame_t *frame);
 void light_set_mood(const mood_t *mood);
+void light_set_genre(music_genre_t genre);
+/** Color theme, saved in NVS */
+void light_set_theme(light_theme_t theme);
+void light_next_theme(void);
 void light_set_mode(light_mode_t mode);
 void light_set_color(rgbw_t color);
 void light_set_brightness(float brightness);
@@ -58,6 +86,8 @@ void light_get_status(light_status_t *status);
 esp_err_t display_start(void);
 /** Latest analysis window, shown on the next refresh */
 void display_show_music(const mood_t *mood, const music_features_t *f);
+/** Every analyzer hop, drives the corona animation */
+void display_on_frame(const music_frame_t *frame);
 
 #ifdef __cplusplus
 }

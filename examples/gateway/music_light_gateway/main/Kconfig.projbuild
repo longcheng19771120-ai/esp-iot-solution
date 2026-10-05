@@ -199,6 +199,46 @@ menu "Music Light Gateway"
         endif
     endmenu
 
+    menu "Bluetooth receiver board"
+        config BT_LINK_ENABLE
+            bool "Analyse music from a Bluetooth receiver board"
+            default n
+            help
+                An ESP32 board running the bt_receiver firmware (see bt_receiver/)
+                receives music from a phone over Bluetooth and plays it through an
+                I2S amplifier. This chip listens on the same I2S wires as a slave,
+                so the music is analysed before it reaches the room, and reads the
+                connection and track from the board over UART. While the board plays,
+                the analysis uses it instead of the microphone.
+
+        if BT_LINK_ENABLE
+            config BT_LINK_I2S_BCLK_GPIO
+                int "I2S BCLK GPIO (from the board)"
+                default 1
+
+            config BT_LINK_I2S_WS_GPIO
+                int "I2S WS GPIO (from the board)"
+                default 2
+
+            config BT_LINK_I2S_DIN_GPIO
+                int "I2S data GPIO (from the board)"
+                default 47
+
+            config BT_LINK_UART_NUM
+                int "UART port"
+                default 1
+                range 1 2
+
+            config BT_LINK_UART_TX_GPIO
+                int "UART TX GPIO (to the board RX)"
+                default 42
+
+            config BT_LINK_UART_RX_GPIO
+                int "UART RX GPIO (from the board TX)"
+                default 21
+        endif
+    endmenu
+
     config GATEWAY_BUTTON_GPIO
         int "Button GPIO (-1 to disable)"
         default 0
