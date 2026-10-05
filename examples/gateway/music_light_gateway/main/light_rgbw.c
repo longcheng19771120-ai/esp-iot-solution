@@ -149,3 +149,15 @@ int light_get_state_json(char *buf, size_t size)
                     light_mode_name(mode), (int)lroundf(bri * 100), (int)lroundf(c.r * 255), (int)lroundf(c.g * 255),
                     (int)lroundf(c.b * 255), (int)lroundf(c.w * 255));
 }
+
+void light_get_status(light_status_t *status)
+{
+    portENTER_CRITICAL(&s_lock);
+    status->mode = s_fx.mode;
+    status->brightness = s_fx.brightness;
+    status->out = s_fx.out;
+    status->mood.silent = s_fx.silence > 0.5f;
+    status->mood.valence = s_fx.valence;
+    status->mood.energy = s_fx.energy;
+    portEXIT_CRITICAL(&s_lock);
+}

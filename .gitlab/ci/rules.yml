@@ -4038,6 +4038,8 @@
     - <<: *if-dev-push
       changes: *patterns-components_button
     - <<: *if-dev-push
+      changes: *patterns-components_display_lcd_esp_lcd_st77916
+    - <<: *if-dev-push
       changes: *patterns-example_gateway_music_light_gateway
 
 .rules:build:example_esp_local_controller:

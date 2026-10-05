@@ -35,6 +35,13 @@ esp_err_t gateway_mqtt_publish_light_state(void);
 esp_err_t audio_input_start(void);
 
 /* RGBW output (light_rgbw.c), all functions are thread safe */
+typedef struct {
+    light_mode_t mode;
+    float brightness;       /* user brightness 0..1 */
+    rgbw_t out;             /* what the LEDs show right now, before gamma */
+    mood_t mood;            /* smoothed mood the color follows */
+} light_status_t;
+
 esp_err_t light_rgbw_start(void);
 void light_on_frame(const music_frame_t *frame);
 void light_set_mood(const mood_t *mood);
@@ -45,6 +52,12 @@ void light_set_brightness(float brightness);
 void light_next_mode(void);
 /** Format the light state as JSON, returns the length */
 int light_get_state_json(char *buf, size_t size);
+void light_get_status(light_status_t *status);
+
+/* Round touch display (display_ui.c), no-ops when CONFIG_DISPLAY_ENABLE is off */
+esp_err_t display_start(void);
+/** Latest analysis window, shown on the next refresh */
+void display_show_music(const mood_t *mood, const music_features_t *f);
 
 #ifdef __cplusplus
 }
