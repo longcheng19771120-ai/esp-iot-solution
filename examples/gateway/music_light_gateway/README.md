@@ -21,7 +21,8 @@ external speaker (AirPlay etc.) -> MEMS mic -> I2S -> beat / loudness (every 16 
 | Genre | Every 5.12 s the window is classified as silence / ambient / classical / pop / rock / electronic / hip-hop from tempo, beat regularity, percussiveness, onset rate, band shares, dynamic range and brightness. A new genre takes over after two agreeing windows or one confident one |
 | Mood | Every 5.12 s the window is summarised into 11 features: tempo, beat regularity, percussiveness, onset rate, low/mid/high energy share, dynamic range, brightness, major/minor and key strength. These map to two continuous values from 0 to 1: valence (sad to happy) and energy (calm to intense) |
 | Effects | The genre picks the palette and its rhythm: blues and violet drifting slowly for ambient, warm white and amber for classical, bright multi-color on every other beat for pop, red and orange for rock, neon colors on every beat for electronic, violet, gold and red for hip-hop. Mood adjusts it: happy music turns warm hues toward gold and adds warm white, sad music turns cool hues toward blue, mutes warm ones and removes white, with the shift capped so each genre keeps its colors. Energy speeds up or slows down the genre's color changes and fades and scales its beat flashes. Warm-white breathing when quiet |
-| Display | Round 360×360 touch screen (LVGL): genre, mood, BPM, a glowing disc that mirrors the light, and a dot placing the music on the valence × energy plane. Drag the ring to set brightness, tap the button to cycle the mode |
+| Themes | `vivid` uses the saturated palettes above. `song` uses muted Chinese traditional colors in the Song dynasty style, with slower fades and softer beat flashes: celadon 天青, moon white 月白 and ink blue 黛蓝 for ambient; old-silk yellow 缃色, ivory 牙色 and sandalwood 檀色 for classical; rouge 胭脂, lotus mauve 藕荷 and gosling yellow 鹅黄 for pop; cinnabar 丹砂, ochre 赭石 and amber 黄栌 for rock; the azurite, malachite and gold of *A Thousand Li of Rivers and Mountains* for electronic; ink violet 黛紫, gold 赤金 and vermilion 朱红 for hip-hop. Switch with the `theme` command or by tapping the disc on the screen; the choice is kept across reboots |
+| Display | Round 360×360 touch screen (LVGL): genre, mood, BPM, a glowing disc that mirrors the light, and a dot placing the music on the valence × energy plane. Drag the ring to set brightness, tap the disc to switch the color theme, tap the button to cycle the mode |
 | Output | LEDC 12-bit PWM at 19.5 kHz (above audible), gamma 2.2, configurable duty cap for the thermal budget |
 
 **Note:** both estimates are rule-based baselines. The genre rules get 89 of 200 five-second windows right on 8 real tracks, clean and with simulated room pickup; most confusions are between genres with similar lighting, such as classical and ambient, or hip-hop and electronic. Major/minor detection works on real recordings, but on 8 real tracks with simulated room pickup the quadrant (calm / happy / tense / sad) matched a subjective label in about half of the 5 s windows, with an average error of about 0.2 on each axis. A typical miss is energetic orchestral music without drums, such as a Hungarian Dance, which reads as sad rather than tense. Calibrate both with recordings from your own room and your own labels (see below).
@@ -49,7 +50,7 @@ GPIO 38–41 double as external JTAG pins; debugging over the built-in USB-JTAG 
 |-------|-----------|---------|
 | `<base>/status` | up | Retained `online` / `offline` (LWT) |
 | `<base>/music` | up | Every 5 s: genre and confidence, mood quadrant, valence, energy, BPM, regularity, mode, key strength, level, band shares, feature vectors |
-| `<base>/light/state` | up | Retained: mode, current genre, brightness, static color |
+| `<base>/light/state` | up | Retained: mode, color theme, current genre, brightness, static color |
 | `<base>/telemetry` | up | Uptime, heap, RSSI |
 | `<base>/cmd` | down | See below |
 | `<base>/resp` | up | Command replies |
@@ -59,6 +60,7 @@ GPIO 38–41 double as external JTAG pins; debugging over the built-in USB-JTAG 
 | `mode music` / `mode static` / `mode off` | Switch mode |
 | `color 255 120 0 50` | Static R G B W (0–255), switches to static mode |
 | `brightness 60` | Brightness 0–100 |
+| `theme song` / `theme vivid` | Color theme, kept across reboots |
 | `label rock happy` / `label pop 0.3 0.9` / `label none` | Tag the following `/music` messages for calibration with a genre (`ambient`, `classical`, `pop`, `rock`, `electronic`, `hiphop`), a mood (`calm`, `happy`, `tense`, `sad`, or valence and energy from 0 to 1), or both |
 | `ping` / `info` / `reboot` | Diagnostics |
 

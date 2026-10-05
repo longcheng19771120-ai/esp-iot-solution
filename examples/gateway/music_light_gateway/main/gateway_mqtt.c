@@ -155,6 +155,7 @@ static int build_telemetry(char *buf, size_t size)
  *   mode music|static|off
  *   color <r> <g> <b> <w>     0..255 each, switches to static mode
  *   brightness <0..100>
+ *   theme vivid|song         color theme, kept across reboots
  *   label [<genre>] [<calm|happy|tense|sad>|<valence> <energy>] | none
  *                             tag /music messages for calibration, e.g. "label rock", "label pop happy"
  */
@@ -247,6 +248,18 @@ static void handle_cmd(const char *data, int len)
             return;
         }
         light_set_mode(mode);
+    } else if (sscanf(cmd, "theme %15s", arg) == 1) {
+        light_theme_t theme = LIGHT_THEME_MAX;
+        for (int t = 0; t < LIGHT_THEME_MAX; t++) {
+            if (strcmp(arg, light_theme_name((light_theme_t)t)) == 0) {
+                theme = (light_theme_t)t;
+            }
+        }
+        if (theme == LIGHT_THEME_MAX) {
+            reply("error: theme must be vivid or song");
+            return;
+        }
+        light_set_theme(theme);
     } else if (sscanf(cmd, "color %d %d %d %d", &r, &g, &b, &w) == 4) {
         light_set_color((rgbw_t) {
             r / 255.0f, g / 255.0f, b / 255.0f, w / 255.0f

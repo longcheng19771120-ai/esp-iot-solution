@@ -63,6 +63,8 @@ static lv_obj_t *s_bpm_label;
 static lv_obj_t *s_detail_label;
 static lv_obj_t *s_mode_label;
 static lv_obj_t *s_link_label;
+static uint32_t s_theme_shown_at;   /* tick when the theme was last switched, 0 = never */
+#define THEME_SHOW_MS   2000
 
 void display_show_music(const mood_t *mood, const music_features_t *f)
 {
@@ -147,7 +149,11 @@ static void refresh_cb(lv_timer_t *timer)
         lv_obj_add_flag(s_dot, LV_OBJ_FLAG_HIDDEN);
     }
 
-    lv_label_set_text(s_title_label, title(&st));
+    if (s_theme_shown_at && lv_tick_elaps(s_theme_shown_at) < THEME_SHOW_MS) {
+        lv_label_set_text(s_title_label, st.theme == LIGHT_THEME_SONG ? "Song colors" : "Vivid colors");
+    } else {
+        lv_label_set_text(s_title_label, title(&st));
+    }
     if (st.mode == LIGHT_MODE_MUSIC && have_music) {
         lv_label_set_text_fmt(s_bpm_label, "%s, %d BPM", s_mood_names[mood_quadrant(&st.mood)], (int)lroundf(bpm));
         /* LVGL's own formatter has no float support */
@@ -175,6 +181,13 @@ static void arc_event_cb(lv_event_t *e)
     } else {
         gateway_mqtt_publish_light_state();
     }
+}
+
+static void disc_event_cb(lv_event_t *e)
+{
+    light_next_theme();
+    s_theme_shown_at = lv_tick_get() | 1;
+    gateway_mqtt_publish_light_state();
 }
 
 static void mode_event_cb(lv_event_t *e)
@@ -213,7 +226,9 @@ static void build_ui(lv_display_t *disp)
     lv_obj_set_style_border_width(s_disc, 0, 0);
     lv_obj_set_style_shadow_width(s_disc, 40, 0);
     lv_obj_set_style_shadow_spread(s_disc, 4, 0);
-    lv_obj_remove_flag(s_disc, LV_OBJ_FLAG_SCROLLABLE | LV_OBJ_FLAG_CLICKABLE);
+    lv_obj_remove_flag(s_disc, LV_OBJ_FLAG_SCROLLABLE);
+    /* Tap the disc to switch between the vivid and the Song dynasty colors */
+    lv_obj_add_event_cb(s_disc, disc_event_cb, LV_EVENT_CLICKED, NULL);
 
     s_dot = lv_obj_create(s_disc);
     lv_obj_set_size(s_dot, DOT_SIZE, DOT_SIZE);

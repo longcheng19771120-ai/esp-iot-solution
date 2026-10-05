@@ -64,15 +64,96 @@ static const genre_style_t s_styles[MUSIC_GENRE_MAX] = {
 };
 
 /*
+ * Song dynasty palette: the muted, quiet colors of Ru ware, ink painting and
+ * mineral pigments. Each traditional color is given as sRGB hex. Dark ones such as
+ * 黛蓝 keep a lower level, so the light dims slightly on them, but never below 55%
+ * so the room stays lit. Only part of the grey in these muted
+ * colors goes to the warm white LEDs; the rest stays on RGB, which keeps cool
+ * colors such as 天青 cool instead of turning them cream.
+ */
+#define CH(c, s)        ((((c) >> (s)) & 0xff) / 255.0f)
+#define MAX3(a, b, c)   ((a) > (b) ? ((a) > (c) ? (a) : (c)) : ((b) > (c) ? (b) : (c)))
+#define MIN3(a, b, c)   ((a) < (b) ? ((a) < (c) ? (a) : (c)) : ((b) < (c) ? (b) : (c)))
+#define VAL(c)          MAX3(CH(c, 16), CH(c, 8), CH(c, 0))
+#define LIFT(c)         (VAL(c) > 0.55f ? 1.0f : 0.55f / VAL(c))
+#define NR(c)           (CH(c, 16) * LIFT(c))
+#define NG(c)           (CH(c, 8) * LIFT(c))
+#define NB(c)           (CH(c, 0) * LIFT(c))
+#define NW(c)           (0.4f * MIN3(NR(c), NG(c), NB(c)))
+#define TRAD(c)         {NR(c) - NW(c), NG(c) - NW(c), NB(c) - NW(c), NW(c)}
+
+#define TIANQING    0x87A9B5    /* 天青 sky after rain, Ru ware glaze */
+#define YUEBAI      0xD6E4EC    /* 月白 moon white */
+#define DAILAN      0x425066    /* 黛蓝 ink blue */
+#define ZHUQING     0x789262    /* 竹青 bamboo green */
+#define XIANGSE     0xF0C239    /* 缃色 pale yellow of old silk */
+#define YASE        0xEEDEB0    /* 牙色 ivory */
+#define TANSE       0xB36D61    /* 檀色 sandalwood */
+#define YANZHI      0x9D2933    /* 胭脂 rouge */
+#define OUHE        0xC1A0B7    /* 藕荷 lotus root mauve */
+#define EHUANG      0xF2D86B    /* 鹅黄 gosling yellow */
+#define DANSHA      0xD4502F    /* 丹砂 cinnabar */
+#define ZHESHI      0x845A33    /* 赭石 ochre */
+#define HUANGLU     0xE29C45    /* 黄栌 smoke tree amber */
+#define SHIQING     0x1685A9    /* 石青 azurite */
+#define SHILV       0x2E8B74    /* 石绿 malachite */
+#define QUNQING     0x2E59A7    /* 群青 ultramarine */
+#define CHIJIN      0xF2BE45    /* 赤金 red gold */
+#define DAIZI       0x574266    /* 黛紫 ink violet */
+#define ZHUHONG     0xC83C23    /* 朱红 vermilion */
+
+typedef struct {
+    rgbw_t palette[PALETTE_MAX];
+    int palette_len;
+} theme_palette_t;
+
+static const theme_palette_t s_song[MUSIC_GENRE_MAX] = {
+    [MUSIC_GENRE_SILENCE] = {{{1.0f, 0.55f, 0.2f, 0.6f}}, 1},
+    /* Misty landscape */
+    [MUSIC_GENRE_AMBIENT] = {{TRAD(TIANQING), TRAD(YUEBAI), TRAD(DAILAN), TRAD(ZHUQING)}, 4},
+    /* Scholar's study: silk, ivory and sandalwood */
+    [MUSIC_GENRE_CLASSICAL] = {{TRAD(XIANGSE), TRAD(YASE), TRAD(TANSE)}, 3},
+    /* Flowers: rouge, lotus, gosling yellow, celadon */
+    [MUSIC_GENRE_POP] = {{TRAD(YANZHI), TRAD(OUHE), TRAD(EHUANG), TRAD(TIANQING)}, 4},
+    /* Cinnabar, ochre and amber */
+    [MUSIC_GENRE_ROCK] = {{TRAD(DANSHA), TRAD(ZHESHI), TRAD(HUANGLU)}, 3},
+    /* Mineral blues and greens of A Thousand Li of Rivers and Mountains, with gold */
+    [MUSIC_GENRE_ELECTRONIC] = {{TRAD(SHIQING), TRAD(SHILV), TRAD(QUNQING), TRAD(CHIJIN)}, 4},
+    [MUSIC_GENRE_HIPHOP] = {{TRAD(DAIZI), TRAD(CHIJIN), TRAD(ZHUHONG)}, 3},
+};
+
+/* The Song style is restrained: slower fades and softer beat flashes */
+#define SONG_FADE   1.6f
+#define SONG_PULSE  0.6f
+
+static const char *const s_theme_names[LIGHT_THEME_MAX] = {"vivid", "song"};
+
+const char *light_theme_name(light_theme_t theme)
+{
+    return theme < LIGHT_THEME_MAX ? s_theme_names[theme] : "unknown";
+}
+
+static const rgbw_t *palette_of(light_theme_t theme, music_genre_t genre, int *len)
+{
+    genre = genre < MUSIC_GENRE_MAX ? genre : MUSIC_GENRE_SILENCE;
+    if (theme == LIGHT_THEME_SONG) {
+        *len = s_song[genre].palette_len;
+        return s_song[genre].palette;
+    }
+    *len = s_styles[genre].palette_len;
+    return s_styles[genre].palette;
+}
+
+/*
  * Happy music turns warm hues a little toward gold and adds warm white; sad music
- * turns cool hues toward deep blue, mutes warm ones and removes white. Each hue only
+ * turns cool hues toward deep blue, mutes warm ones and dims the white. Each hue only
  * moves within its own half of the color wheel, so orange never passes through red
  * on its way to blue, and the shift is capped so every genre keeps its own colors.
  */
 #define WARM_HUE    40.0f   /* degrees */
 #define COOL_HUE    230.0f
 #define MAX_SHIFT   25.0f   /* hue rotation at valence 0 or 1, degrees */
-#define WHITE_TINT  0.25f   /* warm white added or removed at valence 1 or 0 */
+#define WHITE_TINT  0.25f   /* warm white added at valence 1, scaled by saturation */
 
 static const rgbw_t s_idle = {1.00f, 0.55f, 0.20f, 0.60f};
 
@@ -148,10 +229,11 @@ static float hue_toward(float h, float target, float max_deg)
     return fmodf(h + d + 360.0f, 360.0f);
 }
 
-rgbw_t light_effect_color(music_genre_t genre, int palette_idx, float valence)
+rgbw_t light_effect_color(light_theme_t theme, music_genre_t genre, int palette_idx, float valence)
 {
-    const genre_style_t *st = &s_styles[genre < MUSIC_GENRE_MAX ? genre : MUSIC_GENRE_SILENCE];
-    rgbw_t c = st->palette[palette_idx % st->palette_len];
+    int len;
+    const rgbw_t *palette = palette_of(theme, genre, &len);
+    rgbw_t c = palette[palette_idx % len];
     float t = (clamp01(valence) - 0.5f) * 2.0f;
     float h, s, v;
 
@@ -166,7 +248,8 @@ rgbw_t light_effect_color(music_genre_t genre, int palette_idx, float valence)
         s *= 1.0f + 0.4f * t;
     }
     hsv_to_rgb(h, s, v, &c.r, &c.g, &c.b);
-    c.w = t >= 0 ? fminf(1.0f, c.w + WHITE_TINT * t) : c.w * (1.0f + t);
+    /* Pale colors get little extra white so they keep their hue */
+    c.w = t >= 0 ? fminf(1.0f, c.w + WHITE_TINT * t * s) : c.w * (1.0f + 0.5f * t);
     return c;
 }
 
@@ -208,9 +291,19 @@ void light_effect_set_genre(light_effect_t *fx, music_genre_t genre)
 
 static void step_palette(light_effect_t *fx)
 {
-    fx->palette_idx = (fx->palette_idx + 1) % s_styles[fx->genre].palette_len;
+    int len;
+    palette_of(fx->theme, fx->genre, &len);
+    fx->palette_idx = (fx->palette_idx + 1) % len;
     fx->beat_count = 0;
     fx->step_timer = 0;
+}
+
+void light_effect_set_theme(light_effect_t *fx, light_theme_t theme)
+{
+    if (theme < LIGHT_THEME_MAX) {
+        fx->theme = theme;
+        fx->palette_idx = 0;
+    }
 }
 
 void light_effect_set_mood(light_effect_t *fx, const mood_t *mood)
@@ -249,18 +342,19 @@ void light_effect_render(light_effect_t *fx, float dt, rgbw_t *out)
     case LIGHT_MODE_MUSIC: {
         const genre_style_t *st = &s_styles[fx->genre];
         const float k = tempo_scale(fx->energy);
+        const bool song = fx->theme == LIGHT_THEME_SONG;
         /* Time based steps for beatless genres, and as a fallback if beats stop */
         fx->step_timer += dt;
         if (fx->step_timer >= st->seconds_per_step * k) {
             step_palette(fx);
         }
-        rgbw_t palette_color = light_effect_color(fx->genre, fx->palette_idx, fx->valence);
+        rgbw_t palette_color = light_effect_color(fx->theme, fx->genre, fx->palette_idx, fx->valence);
         rgbw_t color = mix(&palette_color, &s_idle, fx->silence);
-        approach_rgbw(&fx->color, &color, dt, st->fade_s * k);
+        approach_rgbw(&fx->color, &color, dt, st->fade_s * k * (song ? SONG_FADE : 1.0f));
         fx->pulse *= expf(-dt / 0.12f);
 
         /* Energetic music gets bigger beat flashes than the genre's default */
-        float music = st->base + st->level_gain * fx->level_env + st->pulse_gain / k * fx->pulse;
+        float music = st->base + st->level_gain * fx->level_env + st->pulse_gain / k * (song ? SONG_PULSE : 1.0f) * fx->pulse;
         fx->phase += dt;
         float idle = 0.08f * (0.6f + 0.4f * sinf(fx->phase * 6.2832f / 6.0f));
         float intensity = clamp01(lerp(music, idle, fx->silence)) * fx->brightness;

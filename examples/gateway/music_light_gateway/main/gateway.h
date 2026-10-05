@@ -41,6 +41,7 @@ typedef struct {
     light_mode_t mode;
     float brightness;       /* user brightness 0..1 */
     music_genre_t genre;    /* genre the palette follows */
+    light_theme_t theme;
     rgbw_t out;             /* what the LEDs show right now, before gamma */
     mood_t mood;            /* smoothed mood the color follows */
 } light_status_t;
@@ -49,6 +50,9 @@ esp_err_t light_rgbw_start(void);
 void light_on_frame(const music_frame_t *frame);
 void light_set_mood(const mood_t *mood);
 void light_set_genre(music_genre_t genre);
+/** Color theme, saved in NVS */
+void light_set_theme(light_theme_t theme);
+void light_next_theme(void);
 void light_set_mode(light_mode_t mode);
 void light_set_color(rgbw_t color);
 void light_set_brightness(float brightness);
