@@ -61,6 +61,7 @@ static lv_obj_t *s_title_label;
 static lv_obj_t *s_bpm_label;
 static lv_obj_t *s_mode_label;
 static lv_obj_t *s_link_label;
+static lv_obj_t *s_bt_label;
 static uint32_t s_theme_shown_at;   /* tick when the theme was last switched, 0 = never */
 #define THEME_SHOW_MS   2000
 
@@ -276,6 +277,18 @@ static void refresh_cb(lv_timer_t *timer)
     }
     lv_obj_set_style_text_color(s_link_label, gateway_mqtt_is_connected() ?
                                 lv_palette_main(LV_PALETTE_GREEN) : lv_palette_darken(LV_PALETTE_GREY, 2), 0);
+
+    /* Bluetooth: hidden until a phone connects, blue while the analysis listens to it */
+    bt_status_t bt;
+    bt_link_get_status(&bt);
+    lv_obj_align(s_link_label, LV_ALIGN_CENTER, bt.connected ? -12 : 0, -150);
+    if (bt.connected) {
+        lv_obj_remove_flag(s_bt_label, LV_OBJ_FLAG_HIDDEN);
+        lv_obj_set_style_text_color(s_bt_label, bt_link_active() ?
+                                    lv_palette_main(LV_PALETTE_BLUE) : lv_palette_darken(LV_PALETTE_GREY, 2), 0);
+    } else {
+        lv_obj_add_flag(s_bt_label, LV_OBJ_FLAG_HIDDEN);
+    }
 }
 
 static void arc_event_cb(lv_event_t *e)
@@ -335,6 +348,11 @@ static void build_ui(lv_display_t *disp)
     s_link_label = lv_label_create(scr);
     lv_label_set_text(s_link_label, LV_SYMBOL_WIFI);
     lv_obj_align(s_link_label, LV_ALIGN_CENTER, 0, -150);
+
+    s_bt_label = lv_label_create(scr);
+    lv_label_set_text(s_bt_label, LV_SYMBOL_BLUETOOTH);
+    lv_obj_align(s_bt_label, LV_ALIGN_CENTER, 12, -150);
+    lv_obj_add_flag(s_bt_label, LV_OBJ_FLAG_HIDDEN);
 
     /* Genre and mood sit inside the moon */
     s_title_label = lv_label_create(scr);

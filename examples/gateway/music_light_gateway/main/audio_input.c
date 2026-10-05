@@ -12,7 +12,8 @@
 
 /*
  * Digital MEMS microphone (INMP441, ICS-43434, SPH0645 ...) on standard I2S.
- * These output 24-bit samples left aligned in a 32-bit slot.
+ * These output 24-bit samples left aligned in a 32-bit slot. While the
+ * Bluetooth receiver board plays music, its samples are analysed instead.
  */
 #define SAMPLE_RATE CONFIG_AUDIO_SAMPLE_RATE
 
@@ -33,14 +34,31 @@ static void audio_task(void *arg)
     music_features_t features;
     music_genre_t current = MUSIC_GENRE_SILENCE, candidate = MUSIC_GENRE_SILENCE;
     int candidate_count = 0;
+    bool use_bt = false;
 
     while (1) {
-        size_t got = 0;
-        if (i2s_channel_read(s_rx, raw, sizeof(raw), &got, portMAX_DELAY) != ESP_OK || got != sizeof(raw)) {
-            continue;
+        bool bt = bt_link_active();
+        if (bt != use_bt) {
+            /* Tempo and loudness history from the other source would only mislead */
+            ESP_LOGI(TAG, "Listening to %s", bt ? "Bluetooth" : "the microphone");
+            use_bt = bt;
+            bt_link_set_consuming(bt);
+            music_analyzer_init(&s_ma, SAMPLE_RATE, CONFIG_AUDIO_SILENCE_DB);
         }
-        for (int i = 0; i < MA_HOP_SIZE; i++) {
-            samples[i] = (float)(raw[i] >> 8) / 8388608.0f;
+
+        if (use_bt) {
+            /* The microphone DMA simply overruns meanwhile; its oldest data is dropped */
+            if (!bt_link_read(samples, MA_HOP_SIZE, 100)) {
+                continue;
+            }
+        } else {
+            size_t got = 0;
+            if (i2s_channel_read(s_rx, raw, sizeof(raw), &got, portMAX_DELAY) != ESP_OK || got != sizeof(raw)) {
+                continue;
+            }
+            for (int i = 0; i < MA_HOP_SIZE; i++) {
+                samples[i] = (float)(raw[i] >> 8) / 8388608.0f;
+            }
         }
 
         bool window_done = music_analyzer_process(&s_ma, samples, &frame, &features);

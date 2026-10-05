@@ -24,6 +24,7 @@
  *   <base>/telemetry    periodic JSON with uptime, heap and RSSI
  *   <base>/music        mood, tempo and features after every analysis window
  *   <base>/light/state  retained light mode, brightness and static color
+ *   <base>/bt           retained Bluetooth receiver state and current track
  *   <base>/cmd          subscribed, see handle_cmd()
  *   <base>/resp         replies to commands
  */
@@ -38,6 +39,7 @@ static char s_topic_status[TOPIC_LEN];
 static char s_topic_telemetry[TOPIC_LEN];
 static char s_topic_music[TOPIC_LEN];
 static char s_topic_light[TOPIC_LEN];
+static char s_topic_bt[TOPIC_LEN];
 static char s_topic_cmd[TOPIC_LEN];
 static char s_topic_resp[TOPIC_LEN];
 
@@ -96,10 +98,10 @@ esp_err_t gateway_mqtt_publish_music(music_genre_t genre, float genre_confidence
     int n = snprintf(buf, sizeof(buf),
                      "{\"genre\":\"%s\",\"genre_conf\":%.2f,\"mood\":\"%s\",\"valence\":%.2f,\"energy\":%.2f,\"bpm\":%.1f,\"regularity\":%.2f,"
                      "\"mode\":%.2f,\"key_strength\":%.2f,\"level_db\":%.1f,\"onsets_per_s\":%.2f,"
-                     "\"bass\":%.2f,\"mid\":%.2f,\"high\":%.2f,\"silent\":%.2f",
+                     "\"bass\":%.2f,\"mid\":%.2f,\"high\":%.2f,\"silent\":%.2f,\"source\":\"%s\"",
                      genre_name(genre), genre_confidence, mood_quadrant_name(mood_quadrant(mood)), mood->valence, mood->energy, f->bpm, f->regularity,
                      f->mode, f->key_strength, f->level_db_mean, f->onset_rate, f->bass_ratio, f->mid_ratio,
-                     f->high_ratio, f->silent_ratio);
+                     f->high_ratio, f->silent_ratio, bt_link_active() ? "bt" : "mic");
     mood_feature_vector(f, v);
     genre_feature_vector(f, gv);
     n = append_vector(buf, n, sizeof(buf), "vec", v, MOOD_FEATURE_COUNT);
@@ -128,6 +130,43 @@ esp_err_t gateway_mqtt_publish_light_state(void)
     int n = light_get_state_json(buf, sizeof(buf));
     return publish(s_topic_light, buf, n, 1, true);
 }
+
+#if CONFIG_BT_LINK_ENABLE
+/* Copies src into a JSON string body, escaping quotes, backslashes and control characters */
+static void json_escape(char *dst, int size, const char *src)
+{
+    int n = 0;
+    for (; *src && n < size - 7; src++) {
+        unsigned char c = (unsigned char) * src;
+        if (c == '"' || c == '\\') {
+            dst[n++] = '\\';
+            dst[n++] = c;
+        } else if (c < 0x20) {
+            n += snprintf(dst + n, size - n, "\\u%04x", c);
+        } else {
+            dst[n++] = c;
+        }
+    }
+    dst[n] = '\0';
+}
+
+esp_err_t gateway_mqtt_publish_bt(void)
+{
+    bt_status_t st;
+    char title[2 * sizeof(st.title)], artist[2 * sizeof(st.artist)], buf[384];
+    bt_link_get_status(&st);
+    json_escape(title, sizeof(title), st.title);
+    json_escape(artist, sizeof(artist), st.artist);
+    int n = snprintf(buf, sizeof(buf), "{\"connected\":%s,\"playing\":%s,\"sample_rate\":%d,\"title\":\"%s\",\"artist\":\"%s\"}",
+                     st.connected ? "true" : "false", st.playing ? "true" : "false", st.sample_rate, title, artist);
+    return publish(s_topic_bt, buf, n, 1, true);
+}
+#else
+esp_err_t gateway_mqtt_publish_bt(void)
+{
+    return ESP_OK;
+}
+#endif
 
 static void reply(const char *text)
 {
@@ -292,6 +331,7 @@ static void mqtt_event_handler(void *arg, esp_event_base_t base, int32_t event_i
         esp_mqtt_client_subscribe(s_client, s_topic_cmd, 1);
         esp_mqtt_client_publish(s_client, s_topic_status, "online", 0, 1, true);
         gateway_mqtt_publish_light_state();
+        gateway_mqtt_publish_bt();
         break;
     case MQTT_EVENT_DISCONNECTED:
         ESP_LOGW(TAG, "Disconnected from broker");
@@ -339,13 +379,14 @@ esp_err_t gateway_mqtt_start(void)
     snprintf(s_topic_telemetry, TOPIC_LEN, "%s/telemetry", s_base);
     snprintf(s_topic_music, TOPIC_LEN, "%s/music", s_base);
     snprintf(s_topic_light, TOPIC_LEN, "%s/light/state", s_base);
+    snprintf(s_topic_bt, TOPIC_LEN, "%s/bt", s_base);
     snprintf(s_topic_cmd, TOPIC_LEN, "%s/cmd", s_base);
     snprintf(s_topic_resp, TOPIC_LEN, "%s/resp", s_base);
 
     esp_mqtt_client_config_t cfg = {
         .broker.address.uri = CONFIG_GATEWAY_MQTT_BROKER_URI,
         .credentials.client_id = gateway_get_id(),
-                    .session.keepalive = 60,
+        .session.keepalive = 60,
         .session.last_will = {
             .topic = s_topic_status,
             .msg = "offline",

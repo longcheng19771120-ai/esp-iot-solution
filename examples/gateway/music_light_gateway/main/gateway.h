@@ -32,9 +32,29 @@ esp_err_t gateway_mqtt_publish_music(music_genre_t genre, float genre_confidence
                                      const music_features_t *f);
 /** Publish the light state to <prefix>/<id>/light/state (retained) */
 esp_err_t gateway_mqtt_publish_light_state(void);
+/** Publish the Bluetooth receiver state to <prefix>/<id>/bt (retained) */
+esp_err_t gateway_mqtt_publish_bt(void);
 
 /* Microphone and analysis (audio_input.c) */
 esp_err_t audio_input_start(void);
+
+/* Bluetooth receiver board (bt_link.c), no-ops when CONFIG_BT_LINK_ENABLE is off */
+typedef struct {
+    bool connected;         /* a phone is connected to the receiver board */
+    bool playing;
+    int sample_rate;        /* measured on the I2S wires, 0 = no clock */
+    char title[64];         /* UTF-8, from the phone */
+    char artist[64];
+} bt_status_t;
+
+esp_err_t bt_link_start(void);
+/** True while the receiver board delivers music; the analysis then uses it instead of the mic */
+bool bt_link_active(void);
+/** Queue samples for bt_link_read() or stop; starting drops anything stale */
+void bt_link_set_consuming(bool on);
+/** Mono samples at CONFIG_AUDIO_SAMPLE_RATE, false if they did not arrive in time */
+bool bt_link_read(float *samples, int count, int timeout_ms);
+void bt_link_get_status(bt_status_t *status);
 
 /* RGBW output (light_rgbw.c), all functions are thread safe */
 typedef struct {
