@@ -50,6 +50,7 @@ static void audio_task(void *arg)
                  "onsets %.1f/s | %5.1f dBFS", mood_quadrant_name(mood_quadrant(&mood)), mood.valence, mood.energy,
                  features.mode, features.key_strength, features.bpm, features.regularity, features.onset_rate,
                  features.level_db_mean);
+        display_show_music(&mood, &features);
         gateway_mqtt_publish_music(&mood, &features);
     }
 }

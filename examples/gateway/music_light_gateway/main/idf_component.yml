@@ -1,7 +1,7 @@
 ## IDF Component Manager Manifest File
 dependencies:
   idf:
-    version: ">=5.3"
+    version: ">=5.4"
   espressif/button:
     version: "^4.1.0"
     override_path: "../../../../components/button"
@@ -10,3 +10,9 @@ dependencies:
     version: "1.*"
     rules:
       - if: "idf_version >=6.0"
+  espressif/esp_lcd_st77916:
+    version: "^2.0.2"
+    override_path: "../../../../components/display/lcd/esp_lcd_st77916"
+  espressif/esp_lcd_touch_cst816s: "^1.1.0"
+  espressif/esp_lvgl_port: "^2.6.0"
+  lvgl/lvgl: "^9.3.0"

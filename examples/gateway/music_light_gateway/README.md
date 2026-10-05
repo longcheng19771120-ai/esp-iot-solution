@@ -20,6 +20,7 @@ external speaker (AirPlay etc.) -> MEMS mic -> I2S -> beat / loudness (every 16 
 | Key | Every 64 ms a 2048-point FFT is folded into a 12-tone chroma profile; at the end of each window it is matched against major and minor key profiles (Krumhansl-Kessler), giving the key, how major or minor it sounds, and how tonal the music is |
 | Mood | Every 5.12 s the window is summarised into 11 features: tempo, beat regularity, percussiveness, onset rate, low/mid/high energy share, dynamic range, brightness, major/minor and key strength. These map to two continuous values from 0 to 1: valence (sad to happy) and energy (calm to intense) |
 | Effects | Valence and energy pick a color blended from four corners (calm: warm white and amber, happy: orange and pink, tense: red and purple, sad: blue and teal). Energy also sets how hard beats flash, how fast colors fade and how often the accent color swaps in. Mood changes are smoothed over a few seconds; warm-white breathing when quiet |
+| Display | Round 360×360 touch screen (LVGL): mood, BPM, a glowing disc that mirrors the light, and a dot placing the music on the valence × energy plane. Drag the ring to set brightness, tap the button to cycle the mode |
 | Output | LEDC 12-bit PWM at 19.5 kHz (above audible), gamma 2.2, configurable duty cap for the thermal budget |
 
 **Note:** the default mood estimate is a rule-based baseline. Major/minor detection works on real recordings, but on 8 real tracks with simulated room pickup the quadrant (calm / happy / tense / sad) matched a subjective label in about half of the 5 s windows, with an average error of about 0.2 on each axis. A typical miss is energetic orchestral music without drums, such as a Hungarian Dance, which reads as sad rather than tense. Mood is subjective, so calibrate it with recordings from your own room and your own labels (see below).
@@ -31,8 +32,8 @@ external speaker (AirPlay etc.) -> MEMS mic -> I2S -> beat / loudness (every 16 
 | Mic BCLK / WS / DIN | 4 / 5 / 6 | Kconfig |
 | Light R / G / B / W PWM | 38 / 39 / 40 / 41 | To the DIM inputs of the constant-current drivers, Kconfig |
 | Button | 0 | Click cycles music / static / off, 5 s long press reboots |
-| Round display QSPI (reserved) | CS 10, CLK 12, D0 11, D1 13, D2 14, D3 9, RST 8, backlight 7 | Not driven by this firmware yet |
-| Touch I2C (reserved) | SDA 15, SCL 16, INT 17, RST 18 | Not driven yet |
+| Round display QSPI | CS 10, CLK 12, D0 11, D1 13, D2 14, D3 9, RST 8, backlight 7 | ST77916, Kconfig |
+| Touch I2C | SDA 15, SCL 16, INT 17, RST 18 | CST816S, Kconfig |
 | Bluetooth module UART (reserved) | TX 42, RX 21 | Not driven yet |
 | USB debug / flashing | 19 / 20 | Built-in USB-Serial-JTAG |
 | Avoid | 3, 45, 46 (strapping); 35, 36, 37 (octal PSRAM) | |
@@ -62,15 +63,23 @@ GPIO 38–41 double as external JTAG pins; debugging over the built-in USB-JTAG 
 
 ## Build
 
-Requires ESP-IDF v5.3 or later.
+Requires ESP-IDF v5.4 or later.
 
 ```bash
 idf.py set-target esp32s3
-idf.py menuconfig   # Music Light Gateway: Wi-Fi, broker, mic and light pins, power cap
+idf.py menuconfig   # Music Light Gateway: Wi-Fi, broker, mic, light and display pins, power cap
 idf.py build flash monitor
 ```
 
 The log prints one analysis line every 5 s for tuning against what you hear.
+
+## Round Display
+
+The default panel is a 1.8" 360×360 ST77916 LCD on QSPI with a CST816S touch controller, a common round module. The display runs at a lower priority than audio analysis and the light, so drawing never delays a beat. If the touch controller does not answer, the screen still works without touch; if the screen itself fails to start, the light keeps running. Turn the display off under *Round touch display* in menuconfig to build without it.
+
+ST77916 panels from different vendors sometimes need their own initialization commands; if the screen stays blank or shows wrong colors, pass the vendor's sequence through `st77916_vendor_config_t.init_cmds` in `display_ui.c`. If touches land mirrored, toggle the mirror options in menuconfig.
+
+The firmware enables octal PSRAM (as on the N16R8 module) and still boots if none is fitted. The app partition is 3 MB, which fits a 4 MB flash.
 
 ## Silence Threshold
 
@@ -112,6 +121,5 @@ With only a handful of songs the fitted model usually does worse than the built-
 
 ## Next Steps
 
-- Round touch display UI (LVGL)
 - With enough data, move to an ESP-DL convolutional model on log-mel features
 - Measure CPU load and power, and verify thermals with the 8 W light

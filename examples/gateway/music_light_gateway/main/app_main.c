@@ -57,6 +57,10 @@ void app_main(void)
     /* Light first so the room is lit even before the network comes up */
     ESP_ERROR_CHECK(light_rgbw_start());
     ESP_ERROR_CHECK(audio_input_start());
+    /* A missing or faulty screen must not stop the light */
+    if (display_start() != ESP_OK) {
+        ESP_LOGW("gateway", "Display not started, continuing without it");
+    }
     button_init();
     /* MQTT is started from the Wi-Fi event handler once an IP is assigned */
     ESP_ERROR_CHECK(gateway_wifi_start());
