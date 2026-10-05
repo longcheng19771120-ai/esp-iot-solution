@@ -26,7 +26,7 @@
 #define LCD_HOST        SPI2_HOST
 #define LCD_RES         360
 #define DRAW_LINES      36
-#define REFRESH_MS      50
+#define REFRESH_MS      40
 #define TOUCH_I2C_PORT  I2C_NUM_0
 
 #if CONFIG_DISPLAY_BACKLIGHT_ACTIVE_HIGH
@@ -45,8 +45,6 @@
 #define TOUCH_MIRROR_Y  0
 #endif
 
-#define DISC_SIZE       140
-#define DOT_SIZE        12
 
 static const char *TAG = "display";
 
@@ -54,17 +52,37 @@ static const char *TAG = "display";
 static portMUX_TYPE s_lock = portMUX_INITIALIZER_UNLOCKED;
 static float s_bpm;
 static bool s_have_music;
+static float s_bass, s_high;        /* latest hop band shares */
+static bool s_beat;                 /* a beat arrived since the last refresh */
 
 static lv_obj_t *s_arc;
-static lv_obj_t *s_disc;
-static lv_obj_t *s_dot;
+static lv_obj_t *s_corona;
 static lv_obj_t *s_title_label;
 static lv_obj_t *s_bpm_label;
-static lv_obj_t *s_detail_label;
 static lv_obj_t *s_mode_label;
 static lv_obj_t *s_link_label;
 static uint32_t s_theme_shown_at;   /* tick when the theme was last switched, 0 = never */
 #define THEME_SHOW_MS   2000
+
+/*
+ * Corona: a black moon with streamers of light around it, like a solar eclipse.
+ * The streamers take the light's current color, grow with the music's level,
+ * flare on beats, swell in broad lobes with bass and flicker with treble.
+ */
+#define MOON_R          72
+#define RAY_MAX         72          /* streamer length at full level, px */
+#define RAY_MIN         6
+#define RAY_COUNT       72
+#define CORONA_SIZE     (2 * (MOON_R + RAY_MAX + 6))
+
+static float s_ray_len[RAY_COUNT];
+static float s_ray_noise[RAY_COUNT];
+static lv_color_t s_corona_color;
+static float s_corona_glow;         /* 0..1, ring and streamer brightness */
+static float s_phase;               /* slow drift of the streamer pattern, rad */
+static float s_kick;                /* beat flare, decays */
+static float s_bass_s, s_high_s;    /* smoothed band shares */
+static uint32_t s_rand = 1;
 
 void display_show_music(const mood_t *mood, const music_features_t *f)
 {
@@ -74,9 +92,24 @@ void display_show_music(const mood_t *mood, const music_features_t *f)
     portEXIT_CRITICAL(&s_lock);
 }
 
+void display_on_frame(const music_frame_t *frame)
+{
+    portENTER_CRITICAL(&s_lock);
+    s_bass = frame->bass;
+    s_high = frame->high;
+    s_beat |= frame->beat;
+    portEXIT_CRITICAL(&s_lock);
+}
+
 static float clamp01(float v)
 {
     return v < 0 ? 0 : (v > 1 ? 1 : v);
+}
+
+static float frand(void)
+{
+    s_rand = s_rand * 1664525u + 1013904223u;
+    return (s_rand >> 8) / 16777216.0f;
 }
 
 /* Approximate the RGBW mix with RGB: white LEDs add a warm white */
@@ -122,32 +155,108 @@ static const char *title(const light_status_t *st)
     }
 }
 
+/* Advance the streamers by one refresh */
+static void update_corona(const light_status_t *st, float level, bool beat, float bass, float high)
+{
+    const float dt = REFRESH_MS / 1000.0f;
+    /* Size follows the music, not the user's brightness setting */
+    float e = st->brightness > 0.01f ? clamp01(level / st->brightness) : 0;
+
+    if (st->mode == LIGHT_MODE_STATIC) {
+        e = 0.45f + 0.05f * sinf(s_phase * 2.0f);
+        bass = 0.3f;
+        high = 0;
+        beat = false;
+    }
+    s_kick = beat ? 1.0f : s_kick * expf(-dt / 0.15f);
+    s_bass_s += (bass - s_bass_s) * 0.15f;
+    s_high_s += (high - s_high_s) * 0.3f;
+    s_phase += dt * (0.25f + 0.5f * e);
+
+    for (int i = 0; i < RAY_COUNT; i++) {
+        float a = 6.2832f * i / RAY_COUNT;
+        s_ray_noise[i] = 0.7f * s_ray_noise[i] + 0.3f * frand();
+        float shape = 0.5f + 0.22f * sinf(3 * a + s_phase) + 0.14f * sinf(5 * a - 1.7f * s_phase + 1.3f) +
+                      0.3f * s_bass_s * sinf(2 * a + 0.5f * s_phase) + 1.2f * s_high_s * (s_ray_noise[i] - 0.5f) +
+                      0.35f * s_kick;
+        float target = st->mode == LIGHT_MODE_OFF ? 0 : RAY_MIN + RAY_MAX * clamp01(shape * (0.3f + 0.8f * e));
+        /* Fast rise, slower fall, like the light itself */
+        s_ray_len[i] += (target - s_ray_len[i]) * (target > s_ray_len[i] ? 0.6f : 0.2f);
+    }
+    s_corona_glow = st->mode == LIGHT_MODE_OFF ? 0.15f : 0.45f + 0.55f * fmaxf(e, s_kick);
+}
+
+static void corona_draw_cb(lv_event_t *e)
+{
+    lv_obj_t *obj = lv_event_get_target(e);
+    lv_layer_t *layer = lv_event_get_layer(e);
+    lv_area_t area;
+    lv_obj_get_coords(obj, &area);
+    const int cx = (area.x1 + area.x2) / 2, cy = (area.y1 + area.y2) / 2;
+    const float rot = s_phase * 0.15f;
+
+    lv_draw_line_dsc_t line;
+    lv_draw_line_dsc_init(&line);
+    line.color = s_corona_color;
+    line.round_end = 1;
+    for (int pass = 0; pass < 2; pass++) {
+        /* A wide faint streamer, then a thin bright core over its inner part */
+        line.width = pass ? 2 : 7;
+        line.opa = (lv_opa_t)((pass ? 230 : 70) * s_corona_glow);
+        for (int i = 0; i < RAY_COUNT; i++) {
+            float len = s_ray_len[i] * (pass ? 0.6f : 1.0f);
+            if (len < 1) {
+                continue;
+            }
+            float a = 6.2832f * i / RAY_COUNT + rot, c = cosf(a), s = sinf(a);
+            line.p1.x = cx + c * (MOON_R + 2);
+            line.p1.y = cy + s * (MOON_R + 2);
+            line.p2.x = cx + c * (MOON_R + 2 + len);
+            line.p2.y = cy + s * (MOON_R + 2 + len);
+            lv_draw_line(layer, &line);
+        }
+    }
+
+    /* Bright rim around the moon, with a softer halo outside it */
+    lv_draw_arc_dsc_t arc;
+    lv_draw_arc_dsc_init(&arc);
+    arc.center.x = cx;
+    arc.center.y = cy;
+    arc.start_angle = 0;
+    arc.end_angle = 360;
+    arc.color = s_corona_color;
+    arc.radius = MOON_R + 12;
+    arc.width = 12;
+    arc.opa = (lv_opa_t)(60 * s_corona_glow);
+    lv_draw_arc(layer, &arc);
+    arc.radius = MOON_R + 4;
+    arc.width = 5;
+    arc.opa = (lv_opa_t)(255 * s_corona_glow);
+    lv_draw_arc(layer, &arc);
+
+    lv_draw_rect_dsc_t moon;
+    lv_draw_rect_dsc_init(&moon);
+    moon.bg_color = lv_color_black();
+    moon.radius = LV_RADIUS_CIRCLE;
+    lv_area_t moon_area = {cx - MOON_R, cy - MOON_R, cx + MOON_R, cy + MOON_R};
+    lv_draw_rect(layer, &moon, &moon_area);
+}
+
 static void refresh_cb(lv_timer_t *timer)
 {
     light_status_t st;
     light_get_status(&st);
     portENTER_CRITICAL(&s_lock);
-    float bpm = s_bpm;
-    bool have_music = s_have_music;
+    float bpm = s_bpm, bass = s_bass, high = s_high;
+    bool have_music = s_have_music, beat = s_beat;
+    s_beat = false;
     portEXIT_CRITICAL(&s_lock);
 
     float level;
-    lv_color_t color = screen_color(&st.out, &level);
-    lv_obj_set_style_bg_color(s_disc, color, 0);
-    lv_obj_set_style_shadow_color(s_disc, color, 0);
-    lv_obj_set_style_bg_opa(s_disc, (lv_opa_t)(40 + 215 * level), 0);
-    lv_obj_set_style_shadow_opa(s_disc, (lv_opa_t)(200 * level), 0);
-    lv_obj_set_style_arc_color(s_arc, color, LV_PART_INDICATOR);
-
-    /* Valence left to right, energy bottom to top, inside the disc */
-    const int span = DISC_SIZE / 2 - DOT_SIZE;
-    lv_obj_align(s_dot, LV_ALIGN_CENTER, (int)lroundf((st.mood.valence - 0.5f) * 2 * span),
-                 (int)lroundf((0.5f - st.mood.energy) * 2 * span));
-    if (st.mode == LIGHT_MODE_MUSIC && !st.mood.silent) {
-        lv_obj_remove_flag(s_dot, LV_OBJ_FLAG_HIDDEN);
-    } else {
-        lv_obj_add_flag(s_dot, LV_OBJ_FLAG_HIDDEN);
-    }
+    s_corona_color = screen_color(&st.out, &level);
+    update_corona(&st, level, beat, bass, high);
+    lv_obj_invalidate(s_corona);
+    lv_obj_set_style_arc_color(s_arc, s_corona_color, LV_PART_INDICATOR);
 
     if (s_theme_shown_at && lv_tick_elaps(s_theme_shown_at) < THEME_SHOW_MS) {
         lv_label_set_text(s_title_label, st.theme == LIGHT_THEME_SONG ? "Song colors" : "Vivid colors");
@@ -156,12 +265,8 @@ static void refresh_cb(lv_timer_t *timer)
     }
     if (st.mode == LIGHT_MODE_MUSIC && have_music) {
         lv_label_set_text_fmt(s_bpm_label, "%s, %d BPM", s_mood_names[mood_quadrant(&st.mood)], (int)lroundf(bpm));
-        /* LVGL's own formatter has no float support */
-        lv_label_set_text_fmt(s_detail_label, "valence %d%%  energy %d%%", (int)lroundf(st.mood.valence * 100),
-                              (int)lroundf(st.mood.energy * 100));
     } else {
         lv_label_set_text(s_bpm_label, "");
-        lv_label_set_text(s_detail_label, "");
     }
     lv_label_set_text(s_mode_label, light_mode_name(st.mode));
 
@@ -183,7 +288,7 @@ static void arc_event_cb(lv_event_t *e)
     }
 }
 
-static void disc_event_cb(lv_event_t *e)
+static void corona_click_cb(lv_event_t *e)
 {
     light_next_theme();
     s_theme_shown_at = lv_tick_get() | 1;
@@ -210,55 +315,43 @@ static void build_ui(lv_display_t *disp)
     lv_arc_set_rotation(s_arc, 135);
     lv_arc_set_bg_angles(s_arc, 0, 270);
     lv_arc_set_range(s_arc, 0, 100);
-    lv_obj_set_style_arc_width(s_arc, 14, LV_PART_MAIN);
-    lv_obj_set_style_arc_width(s_arc, 14, LV_PART_INDICATOR);
-    lv_obj_set_style_arc_color(s_arc, lv_color_hex(0x262626), LV_PART_MAIN);
+    lv_obj_set_style_arc_width(s_arc, 10, LV_PART_MAIN);
+    lv_obj_set_style_arc_width(s_arc, 10, LV_PART_INDICATOR);
+    lv_obj_set_style_arc_color(s_arc, lv_color_hex(0x1c1c1c), LV_PART_MAIN);
     lv_obj_set_style_bg_color(s_arc, lv_color_white(), LV_PART_KNOB);
     lv_obj_set_style_pad_all(s_arc, 2, LV_PART_KNOB);
     lv_obj_add_event_cb(s_arc, arc_event_cb, LV_EVENT_VALUE_CHANGED, NULL);
     lv_obj_add_event_cb(s_arc, arc_event_cb, LV_EVENT_RELEASED, NULL);
 
-    /* Glowing disc mirrors the light; the dot inside shows valence and energy */
-    s_disc = lv_obj_create(scr);
-    lv_obj_set_size(s_disc, DISC_SIZE, DISC_SIZE);
-    lv_obj_center(s_disc);
-    lv_obj_set_style_radius(s_disc, LV_RADIUS_CIRCLE, 0);
-    lv_obj_set_style_border_width(s_disc, 0, 0);
-    lv_obj_set_style_shadow_width(s_disc, 40, 0);
-    lv_obj_set_style_shadow_spread(s_disc, 4, 0);
-    lv_obj_remove_flag(s_disc, LV_OBJ_FLAG_SCROLLABLE);
-    /* Tap the disc to switch between the vivid and the Song dynasty colors */
-    lv_obj_add_event_cb(s_disc, disc_event_cb, LV_EVENT_CLICKED, NULL);
-
-    s_dot = lv_obj_create(s_disc);
-    lv_obj_set_size(s_dot, DOT_SIZE, DOT_SIZE);
-    lv_obj_set_style_radius(s_dot, LV_RADIUS_CIRCLE, 0);
-    lv_obj_set_style_bg_color(s_dot, lv_color_white(), 0);
-    lv_obj_set_style_border_color(s_dot, lv_color_black(), 0);
-    lv_obj_set_style_border_width(s_dot, 2, 0);
-    lv_obj_remove_flag(s_dot, LV_OBJ_FLAG_CLICKABLE);
+    /* The corona is drawn by hand; tap it to switch between the vivid and the Song colors */
+    s_corona = lv_obj_create(scr);
+    lv_obj_remove_style_all(s_corona);
+    lv_obj_set_size(s_corona, CORONA_SIZE, CORONA_SIZE);
+    lv_obj_center(s_corona);
+    lv_obj_add_flag(s_corona, LV_OBJ_FLAG_CLICKABLE);
+    lv_obj_add_event_cb(s_corona, corona_draw_cb, LV_EVENT_DRAW_MAIN, NULL);
+    lv_obj_add_event_cb(s_corona, corona_click_cb, LV_EVENT_CLICKED, NULL);
 
     s_link_label = lv_label_create(scr);
     lv_label_set_text(s_link_label, LV_SYMBOL_WIFI);
-    lv_obj_align(s_link_label, LV_ALIGN_CENTER, 0, -140);
+    lv_obj_align(s_link_label, LV_ALIGN_CENTER, 0, -150);
 
+    /* Genre and mood sit inside the moon */
     s_title_label = lv_label_create(scr);
-    lv_obj_set_style_text_font(s_title_label, &lv_font_montserrat_28, 0);
-    lv_obj_align(s_title_label, LV_ALIGN_CENTER, 0, -105);
+    lv_obj_set_style_text_font(s_title_label, &lv_font_montserrat_24, 0);
+    lv_obj_align(s_title_label, LV_ALIGN_CENTER, 0, -8);
+    lv_obj_remove_flag(s_title_label, LV_OBJ_FLAG_CLICKABLE);
 
     s_bpm_label = lv_label_create(scr);
-    lv_obj_set_style_text_font(s_bpm_label, &lv_font_montserrat_20, 0);
-    lv_obj_align(s_bpm_label, LV_ALIGN_CENTER, 0, 92);
-
-    s_detail_label = lv_label_create(scr);
-    lv_obj_set_style_text_color(s_detail_label, lv_palette_main(LV_PALETTE_GREY), 0);
-    lv_obj_align(s_detail_label, LV_ALIGN_CENTER, 0, 116);
+    lv_obj_set_style_text_color(s_bpm_label, lv_palette_lighten(LV_PALETTE_GREY, 1), 0);
+    lv_obj_align(s_bpm_label, LV_ALIGN_CENTER, 0, 22);
 
     lv_obj_t *btn = lv_button_create(scr);
-    lv_obj_set_size(btn, 104, 36);
-    lv_obj_align(btn, LV_ALIGN_CENTER, 0, 150);
-    lv_obj_set_style_radius(btn, 18, 0);
-    lv_obj_set_style_bg_color(btn, lv_color_hex(0x333333), 0);
+    lv_obj_set_size(btn, 96, 32);
+    lv_obj_align(btn, LV_ALIGN_CENTER, 0, 152);
+    lv_obj_set_style_radius(btn, 16, 0);
+    lv_obj_set_style_bg_color(btn, lv_color_hex(0x1c1c1c), 0);
+    lv_obj_set_style_shadow_width(btn, 0, 0);
     lv_obj_add_event_cb(btn, mode_event_cb, LV_EVENT_CLICKED, NULL);
     s_mode_label = lv_label_create(btn);
     lv_obj_center(s_mode_label);
@@ -385,6 +478,10 @@ esp_err_t display_start(void)
 }
 
 void display_show_music(const mood_t *mood, const music_features_t *f)
+{
+}
+
+void display_on_frame(const music_frame_t *frame)
 {
 }
 

@@ -45,6 +45,7 @@ static void audio_task(void *arg)
 
         bool window_done = music_analyzer_process(&s_ma, samples, &frame, &features);
         light_on_frame(&frame);
+        display_on_frame(&frame);
         if (!window_done) {
             continue;
         }

@@ -66,6 +66,8 @@ void light_get_status(light_status_t *status);
 esp_err_t display_start(void);
 /** Latest analysis window, shown on the next refresh */
 void display_show_music(const mood_t *mood, const music_features_t *f);
+/** Every analyzer hop, drives the corona animation */
+void display_on_frame(const music_frame_t *frame);
 
 #ifdef __cplusplus
 }
